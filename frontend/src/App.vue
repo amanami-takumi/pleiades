@@ -371,9 +371,9 @@
                 type="button"
                 class="inline-flex h-9 items-center gap-1.5 rounded px-3 text-xs font-medium transition"
                 :class="taskSort === option.value ? 'bg-panel2 text-accent' : 'text-neutral-400 hover:text-neutral-100'"
-                @click="taskSort = option.value"
+                @click="setTaskSort(option.value)"
               >
-                <ArrowUpDown :size="14" />{{ option.label }}
+                <ArrowUpDown :size="14" />{{ option.label }}{{ taskSort === option.value ? taskSortMark : '' }}
               </button>
             </div>
             <button class="inline-flex h-10 items-center gap-2 rounded-md border border-border bg-panel px-3 text-sm font-medium text-neutral-100 transition hover:border-accent" type="button" @click="loadTaskData">
@@ -453,61 +453,120 @@
               <h2 class="text-sm font-semibold text-neutral-200">一覧</h2>
               <span class="text-xs text-neutral-500">{{ visibleTasks.length }}件</span>
             </div>
-            <div class="grid gap-3 p-4">
-              <article v-for="task in activeTasks" :key="task.id" class="rounded-md border border-border bg-background p-3">
-                <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <button class="min-w-0 text-left" type="button" @click="editTask(task)">
-                    <h3 class="truncate text-base font-semibold text-neutral-100">{{ task.title }}</h3>
-                    <p class="mt-1 line-clamp-2 text-sm text-neutral-400">{{ task.details || '詳細なし' }}</p>
-                  </button>
-                  <div class="flex shrink-0 items-center gap-2">
-                    <select class="h-9 rounded-md border border-border bg-panel px-2 text-xs outline-none focus:border-accent" :value="task.status" @change="changeTaskStatus(task, ($event.target as HTMLSelectElement).value as TaskStatus)">
-                      <option value="todo">開始前</option>
-                      <option value="doing">進行中</option>
-                      <option value="done">完了</option>
-                    </select>
-                    <button class="flex h-9 w-9 items-center justify-center rounded-md border border-border text-neutral-400 hover:border-loss hover:text-loss" type="button" title="削除" @click="removeTask(task)">
-                      <Trash2 :size="15" />
-                    </button>
-                  </div>
-                </div>
-                <div class="mt-3 flex flex-wrap items-center gap-2 text-xs text-neutral-500">
-                  <span class="inline-flex items-center gap-1 rounded border border-border px-2 py-1">
-                    <Circle :size="12" :class="taskStatusClass(task.status)" />{{ taskStatusLabel(task.status) }}
-                  </span>
-                  <span v-if="task.due_date" class="inline-flex items-center gap-1 rounded border border-border px-2 py-1">
-                    <Calendar :size="12" />{{ task.due_date }}
-                  </span>
-                  <span v-if="task.duration_days !== null" class="inline-flex items-center gap-1 rounded border border-border px-2 py-1">
-                    <Clock3 :size="12" />{{ task.duration_days }}日
-                  </span>
-                  <span v-for="tag in task.tags" :key="tag.id" class="inline-flex items-center gap-1 rounded border border-border px-2 py-1">
-                    <span class="h-2 w-2 rounded-full" :style="{ backgroundColor: tag.color }"></span>{{ tag.name }}
-                  </span>
-                </div>
-              </article>
-              <p v-if="activeTasks.length === 0" class="rounded-md border border-border bg-background px-4 py-8 text-center text-sm text-neutral-500">未完了タスクはありません</p>
+            <div class="overflow-x-auto">
+              <table class="w-full min-w-[940px] table-fixed text-left text-sm">
+                <thead class="border-b border-border text-xs text-neutral-500">
+                  <tr>
+                    <th v-for="column in taskTableColumns" :key="column.value" class="px-3 py-2 font-medium" :class="column.class">
+                      <button class="inline-flex items-center gap-1 rounded px-1 py-1 hover:bg-panel2 hover:text-neutral-200" type="button" @click="setTaskSort(column.value)">
+                        {{ column.label }}
+                        <ArrowUpDown :size="12" :class="taskSort === column.value ? 'text-accent' : 'text-neutral-600'" />
+                        <span v-if="taskSort === column.value" class="text-accent">{{ taskSortMark }}</span>
+                      </button>
+                    </th>
+                    <th class="w-24 px-3 py-2 font-medium">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="task in activeTasks" :key="task.id" class="border-b border-border/70 align-top hover:bg-background/70">
+                    <td class="px-3 py-3">
+                      <button class="block w-full truncate text-left font-semibold text-neutral-100 hover:text-accent" type="button" @click="editTask(task)">
+                        {{ task.title }}
+                      </button>
+                    </td>
+                    <td class="px-3 py-3">
+                      <select class="h-8 w-full rounded-md border border-border bg-panel px-2 text-xs outline-none focus:border-accent" :value="task.status" @change="changeTaskStatus(task, ($event.target as HTMLSelectElement).value as TaskStatus)">
+                        <option value="todo">開始前</option>
+                        <option value="doing">進行中</option>
+                        <option value="done">完了</option>
+                      </select>
+                    </td>
+                    <td class="px-3 py-3 text-neutral-300">{{ task.due_date ?? '' }}</td>
+                    <td class="px-3 py-3 text-right text-neutral-300">{{ task.duration_days === null ? '' : `${task.duration_days}日` }}</td>
+                    <td class="px-3 py-3">
+                      <div class="flex flex-wrap gap-1">
+                        <span v-for="tag in task.tags" :key="tag.id" class="inline-flex max-w-full items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] text-neutral-300">
+                          <span class="h-2 w-2 shrink-0 rounded-full" :style="{ backgroundColor: tag.color }"></span>
+                          <span class="truncate">{{ tag.name }}</span>
+                        </span>
+                      </div>
+                    </td>
+                    <td class="px-3 py-3">
+                      <button class="line-clamp-2 w-full text-left text-xs text-neutral-400 hover:text-accent" type="button" @click="editTask(task)">
+                        {{ task.details || '詳細なし' }}
+                      </button>
+                    </td>
+                    <td class="px-3 py-3">
+                      <div class="flex items-center justify-end gap-2">
+                        <button class="flex h-8 w-8 items-center justify-center rounded-md border border-border text-neutral-400 hover:border-accent hover:text-accent" type="button" title="編集" @click="editTask(task)">
+                          <CheckCircle2 :size="14" />
+                        </button>
+                        <button class="flex h-8 w-8 items-center justify-center rounded-md border border-border text-neutral-400 hover:border-loss hover:text-loss" type="button" title="削除" @click="removeTask(task)">
+                          <Trash2 :size="14" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                  <tr v-if="activeTasks.length === 0">
+                    <td colspan="7" class="px-4 py-8 text-center text-sm text-neutral-500">未完了タスクはありません</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
 
             <div class="border-t border-border px-4 py-3">
               <h2 class="text-sm font-semibold text-neutral-200">完了</h2>
             </div>
-            <div class="grid gap-2 p-4 pt-0">
-              <article v-for="task in completedTasks" :key="task.id" class="grid gap-2 rounded-md border border-border/70 bg-background px-3 py-3 sm:grid-cols-[1fr_auto] sm:items-center">
-                <button class="min-w-0 text-left" type="button" @click="editTask(task)">
-                  <h3 class="truncate text-sm font-semibold text-neutral-300">{{ task.title }}</h3>
-                  <p class="mt-1 text-xs text-neutral-500">{{ formatDateTime(task.completed_at) }}</p>
-                </button>
-                <div class="flex items-center gap-2">
-                  <button class="inline-flex h-8 items-center gap-1 rounded-md border border-border px-2 text-xs text-neutral-300 hover:border-accent" type="button" @click="changeTaskStatus(task, 'doing')">
-                    <RefreshCw :size="13" />再開
-                  </button>
-                  <button class="flex h-8 w-8 items-center justify-center rounded-md border border-border text-neutral-400 hover:border-loss hover:text-loss" type="button" title="削除" @click="removeTask(task)">
-                    <Trash2 :size="13" />
-                  </button>
-                </div>
-              </article>
-              <p v-if="completedTasks.length === 0" class="rounded-md border border-border bg-background px-4 py-6 text-center text-sm text-neutral-500">完了タスクはありません</p>
+            <div class="overflow-x-auto">
+              <table class="w-full min-w-[780px] table-fixed text-left text-sm">
+                <thead class="border-b border-border text-xs text-neutral-500">
+                  <tr>
+                    <th class="w-[24%] px-3 py-2 font-medium">名前</th>
+                    <th class="w-36 px-3 py-2 font-medium">完了日時</th>
+                    <th class="w-28 px-3 py-2 font-medium">期限</th>
+                    <th class="w-[22%] px-3 py-2 font-medium">タグ</th>
+                    <th class="px-3 py-2 font-medium">詳細</th>
+                    <th class="w-24 px-3 py-2 font-medium">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="task in completedTasks" :key="task.id" class="border-b border-border/70 align-top hover:bg-background/70">
+                    <td class="px-3 py-3">
+                      <button class="block w-full truncate text-left font-semibold text-neutral-300 hover:text-accent" type="button" @click="editTask(task)">
+                        {{ task.title }}
+                      </button>
+                    </td>
+                    <td class="px-3 py-3 text-xs text-neutral-500">{{ formatDateTime(task.completed_at) }}</td>
+                    <td class="px-3 py-3 text-neutral-400">{{ task.due_date ?? '' }}</td>
+                    <td class="px-3 py-3">
+                      <div class="flex flex-wrap gap-1">
+                        <span v-for="tag in task.tags" :key="tag.id" class="inline-flex max-w-full items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] text-neutral-400">
+                          <span class="h-2 w-2 shrink-0 rounded-full" :style="{ backgroundColor: tag.color }"></span>
+                          <span class="truncate">{{ tag.name }}</span>
+                        </span>
+                      </div>
+                    </td>
+                    <td class="px-3 py-3">
+                      <button class="line-clamp-2 w-full text-left text-xs text-neutral-500 hover:text-accent" type="button" @click="editTask(task)">
+                        {{ task.details || '詳細なし' }}
+                      </button>
+                    </td>
+                    <td class="px-3 py-3">
+                      <div class="flex items-center justify-end gap-2">
+                        <button class="flex h-8 w-8 items-center justify-center rounded-md border border-border text-neutral-400 hover:border-accent hover:text-accent" type="button" title="再開" @click="changeTaskStatus(task, 'doing')">
+                          <RefreshCw :size="13" />
+                        </button>
+                        <button class="flex h-8 w-8 items-center justify-center rounded-md border border-border text-neutral-400 hover:border-loss hover:text-loss" type="button" title="削除" @click="removeTask(task)">
+                          <Trash2 :size="13" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                  <tr v-if="completedTasks.length === 0">
+                    <td colspan="6" class="px-4 py-6 text-center text-sm text-neutral-500">完了タスクはありません</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </section>
         </div>
@@ -548,14 +607,11 @@ import {
   AlertTriangle,
   ArrowUpDown,
   BriefcaseBusiness,
-  Calendar,
   ChartCandlestick,
   ChartLine,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
-  Circle,
-  Clock3,
   EyeOff,
   GripVertical,
   Home,
@@ -650,13 +706,25 @@ const chartDrawingModes = [
   { value: 'resistance' as const, label: 'レジスタンスラインを描画', shortLabel: '抵抗' }
 ]
 const taskSortOptions = [
-  { value: 'due' as const, label: '期限' },
   { value: 'title' as const, label: '名前' },
-  { value: 'tag' as const, label: 'タグ' }
+  { value: 'status' as const, label: '進行度' },
+  { value: 'due' as const, label: '期限' },
+  { value: 'duration' as const, label: '継続期間' },
+  { value: 'tag' as const, label: 'タグ' },
+  { value: 'details' as const, label: '詳細' }
+]
+const taskTableColumns = [
+  { value: 'title' as const, label: '名前', class: 'w-[18%]' },
+  { value: 'status' as const, label: '進行度', class: 'w-28' },
+  { value: 'due' as const, label: '期限', class: 'w-28' },
+  { value: 'duration' as const, label: '継続期間', class: 'w-24 text-right' },
+  { value: 'tag' as const, label: 'タグ', class: 'w-[18%]' },
+  { value: 'details' as const, label: '詳細', class: '' }
 ]
 
 type ChartDrawingMode = (typeof chartDrawingModes)[number]['value']
 type TaskSort = (typeof taskSortOptions)[number]['value']
+type SortDirection = 'asc' | 'desc'
 type ChartGuideLine = {
   id: string
   type: 'support' | 'resistance'
@@ -695,6 +763,7 @@ const tasks = ref<Task[]>([])
 const taskTags = ref<TaskTag[]>([])
 const taskError = ref('')
 const taskSort = ref<TaskSort>('due')
+const taskSortDirection = ref<SortDirection>('asc')
 const editingTaskId = ref<number | null>(null)
 const taskTitle = ref('')
 const taskStatus = ref<TaskStatus>('todo')
@@ -710,6 +779,7 @@ const selectedSymbol = computed(() => symbols.value.find((symbol) => symbol.id =
 const selectedChartGuideLines = computed(() => (selectedId.value ? chartGuideLinesBySymbol.value[selectedId.value] ?? [] : []))
 const currentTab = computed(() => tabs.find((tab) => tab.key === activeTab.value))
 const editingTask = computed(() => tasks.value.find((task) => task.id === editingTaskId.value) ?? null)
+const taskSortMark = computed(() => (taskSortDirection.value === 'asc' ? '↑' : '↓'))
 const symbolTags = computed(() => {
   const tags = Array.from(new Set(symbols.value.map((symbol) => symbol.tag || 'ウォッチリスト'))).sort((a, b) =>
     a.localeCompare(b, 'ja')
@@ -1091,21 +1161,52 @@ async function removeSelected() {
 }
 
 function compareTasks(a: Task, b: Task) {
+  const direction = taskSortDirection.value === 'asc' ? 1 : -1
+  let result = 0
   if (taskSort.value === 'title') {
-    return a.title.localeCompare(b.title, 'ja') || a.id - b.id
+    result = a.title.localeCompare(b.title, 'ja')
+  } else if (taskSort.value === 'status') {
+    result = statusSortKey(a.status) - statusSortKey(b.status)
+  } else if (taskSort.value === 'tag') {
+    result = taskTagSortKey(a).localeCompare(taskTagSortKey(b), 'ja')
+  } else if (taskSort.value === 'duration') {
+    result = taskDurationSortKey(a) - taskDurationSortKey(b)
+  } else if (taskSort.value === 'details') {
+    result = a.details.localeCompare(b.details, 'ja')
+  } else {
+    result = taskDueSortKey(a).localeCompare(taskDueSortKey(b))
   }
-  if (taskSort.value === 'tag') {
-    return taskTagSortKey(a).localeCompare(taskTagSortKey(b), 'ja') || a.title.localeCompare(b.title, 'ja') || a.id - b.id
+  return result * direction || a.title.localeCompare(b.title, 'ja') || a.id - b.id
+}
+
+function setTaskSort(sort: TaskSort) {
+  if (taskSort.value === sort) {
+    taskSortDirection.value = taskSortDirection.value === 'asc' ? 'desc' : 'asc'
+    return
   }
-  return taskDueSortKey(a).localeCompare(taskDueSortKey(b)) || a.title.localeCompare(b.title, 'ja') || a.id - b.id
+  taskSort.value = sort
+  taskSortDirection.value = 'asc'
 }
 
 function taskDueSortKey(task: Task) {
   return task.due_date || '9999-12-31'
 }
 
+function taskDurationSortKey(task: Task) {
+  return task.duration_days ?? Number.MAX_SAFE_INTEGER
+}
+
 function taskTagSortKey(task: Task) {
   return task.tags.map((tag) => tag.name).sort((a, b) => a.localeCompare(b, 'ja'))[0] ?? '~~~~'
+}
+
+function statusSortKey(status: TaskStatus) {
+  const order: Record<TaskStatus, number> = {
+    todo: 0,
+    doing: 1,
+    done: 2
+  }
+  return order[status]
 }
 
 function taskStatusLabel(status: TaskStatus) {
