@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from datetime import UTC, datetime
 
 from .database import get_db
 from .market import refresh_symbol_row
+
+
+REFRESH_JOB_INTERVAL_SECONDS = float(os.getenv("REFRESH_JOB_INTERVAL_SECONDS", "5"))
 
 
 class RefreshQueue:
@@ -33,6 +37,8 @@ class RefreshQueue:
             if not processed:
                 self._event.clear()
                 await self._event.wait()
+            elif REFRESH_JOB_INTERVAL_SECONDS > 0:
+                await asyncio.sleep(REFRESH_JOB_INTERVAL_SECONDS)
 
 
 def utc_now() -> str:

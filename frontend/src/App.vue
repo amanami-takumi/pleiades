@@ -25,7 +25,7 @@
           <div>
             <p class="text-sm font-medium text-accent">Pleiades</p>
             <h1 class="mt-1 text-2xl font-semibold tracking-normal text-neutral-50 sm:text-3xl">投資情報</h1>
-            <p class="mt-2 text-sm text-neutral-400">yfinance から取得した指数・銘柄を SQLite に保存して表示します。</p>
+            <p class="mt-2 text-sm text-neutral-400">Yahoo Finance から取得した指数・銘柄を SQLite に保存して表示します。</p>
           </div>
           <div class="flex flex-wrap items-center gap-2">
             <form class="flex min-w-0 flex-1 gap-2 sm:flex-none" @submit.prevent="addSymbol">
@@ -90,8 +90,8 @@
                   <GripVertical :size="15" />
                 </span>
                 <span class="min-w-0">
-                  <span class="block truncate text-sm font-semibold text-neutral-100">{{ symbol.ticker }}</span>
-                  <span class="block truncate text-xs" :class="symbol.last_error ? 'text-loss' : 'text-neutral-500'">{{ symbol.last_error ? '取得エラー' : symbol.name }}</span>
+                  <span class="block truncate text-sm font-semibold text-neutral-100">{{ symbol.name }}</span>
+                  <span class="block truncate text-xs" :class="symbol.last_error ? 'text-loss' : 'text-neutral-500'">{{ symbol.last_error ? '取得エラー' : symbol.ticker }}</span>
                   <span class="mt-1 inline-flex max-w-full items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] text-neutral-500" :title="symbol.tag">
                     <Tag :size="11" class="shrink-0" />
                     <span class="truncate">{{ symbol.tag }}</span>
@@ -110,13 +110,13 @@
 
           <section class="min-w-0 rounded-md border border-border bg-panel">
             <div v-if="selectedSymbol" class="flex h-full flex-col">
-              <div class="flex flex-col gap-3 border-b border-border px-4 py-4 md:flex-row md:items-center md:justify-between">
-                <div class="min-w-0">
+              <div class="flex flex-col gap-3 px-4 py-4 md:flex-row md:items-start md:justify-between">
+                <div class="min-w-0 flex-1">
                   <div class="flex items-center gap-2">
-                    <h2 class="truncate text-xl font-semibold text-neutral-50">{{ selectedSymbol.ticker }}</h2>
+                    <h2 class="truncate text-xl font-semibold text-neutral-50">{{ selectedSymbol.name }}</h2>
                     <span class="rounded border border-border px-2 py-0.5 text-xs text-neutral-400">{{ selectedSymbol.asset_type }}</span>
                   </div>
-                  <p class="mt-1 truncate text-sm text-neutral-400">{{ selectedSymbol.name }} / {{ selectedSymbol.exchange ?? 'N/A' }}</p>
+                  <p class="mt-1 truncate text-sm text-neutral-400">{{ selectedSymbol.ticker }} / {{ selectedSymbol.exchange ?? 'N/A' }}</p>
                   <form class="mt-3 flex max-w-sm items-center gap-2" @submit.prevent="saveSelectedTag">
                     <Tag :size="15" class="shrink-0 text-neutral-500" />
                     <input
@@ -128,45 +128,6 @@
                   </form>
                 </div>
                 <div class="flex flex-wrap items-center justify-end gap-2">
-                  <div class="flex rounded-md border border-border bg-background p-1">
-                    <button
-                      v-for="mode in chartModes"
-                      :key="mode.value"
-                      type="button"
-                      class="inline-flex h-8 items-center gap-1.5 rounded px-2.5 text-xs font-medium transition"
-                      :class="chartMode === mode.value ? 'bg-panel2 text-accent' : 'text-neutral-400 hover:text-neutral-100'"
-                      :title="mode.label"
-                      @click="chartMode = mode.value"
-                    >
-                      <component :is="mode.icon" :size="14" />
-                      {{ mode.label }}
-                    </button>
-                  </div>
-                  <div class="flex rounded-md border border-border bg-background p-1">
-                    <button
-                      v-for="average in movingAverageOptions"
-                      :key="average.period"
-                      type="button"
-                      class="h-8 rounded px-2.5 text-xs font-medium transition"
-                      :class="movingAveragePeriods.includes(average.period) ? 'bg-panel2 text-accent' : 'text-neutral-400 hover:text-neutral-100'"
-                      :title="average.label"
-                      @click="toggleMovingAverage(average.period)"
-                    >
-                      {{ average.shortLabel }}
-                    </button>
-                  </div>
-                  <div class="flex rounded-md border border-border bg-background p-1">
-                    <button
-                      v-for="range in ranges"
-                      :key="range.value"
-                      type="button"
-                      class="h-8 rounded px-3 text-xs font-medium transition"
-                      :class="activeRange === range.value ? 'bg-panel2 text-accent' : 'text-neutral-400 hover:text-neutral-100'"
-                      @click="setRange(range.value)"
-                    >
-                      {{ range.label }}
-                    </button>
-                  </div>
                   <button class="flex h-10 w-10 items-center justify-center rounded-md border border-border text-neutral-400 hover:border-loss hover:text-loss" type="button" title="削除" @click="removeSelected">
                     <Trash2 :size="17" />
                   </button>
@@ -176,7 +137,7 @@
                 </div>
               </div>
 
-              <div class="grid gap-3 border-b border-border p-4 sm:grid-cols-2 xl:grid-cols-4">
+              <div class="grid gap-3 border-b border-border px-4 pb-4 sm:grid-cols-2 xl:grid-cols-4">
                 <Metric label="現在値" :value="money(selectedSymbol.latest_close, selectedSymbol.currency)" />
                 <Metric label="騰落率" :value="percent(totalReturn)" :tone="totalReturn ?? undefined" />
                 <Metric label="PER" :value="number(selectedSymbol.per)" />
@@ -188,11 +149,82 @@
                   <AlertTriangle :size="16" />取得エラー
                 </div>
                 <p class="mt-2 break-words text-red-100">{{ selectedSymbol.last_error }}</p>
-                <p class="mt-1 text-xs text-red-200/70">最終試行: {{ selectedSymbol.last_refreshed_at ?? 'N/A' }}</p>
+                <p class="mt-1 text-xs text-red-200/70">最終試行: {{ formatDateTime(selectedSymbol.last_refreshed_at) }}</p>
+              </div>
+
+              <div class="flex flex-wrap items-center gap-2 border-b border-border p-4">
+                <div class="flex rounded-md border border-border bg-background p-1">
+                  <button
+                    v-for="range in ranges"
+                    :key="range.value"
+                    type="button"
+                    class="h-8 rounded px-3 text-xs font-medium transition"
+                    :class="activeRange === range.value ? 'bg-panel2 text-accent' : 'text-neutral-400 hover:text-neutral-100'"
+                    @click="setRange(range.value)"
+                  >
+                    {{ range.label }}
+                  </button>
+                </div>
+                <div class="flex rounded-md border border-border bg-background p-1">
+                  <button
+                    v-for="mode in chartModes"
+                    :key="mode.value"
+                    type="button"
+                    class="inline-flex h-8 items-center gap-1.5 rounded px-2.5 text-xs font-medium transition"
+                    :class="chartMode === mode.value ? 'bg-panel2 text-accent' : 'text-neutral-400 hover:text-neutral-100'"
+                    :title="mode.label"
+                    @click="chartMode = mode.value"
+                  >
+                    <component :is="mode.icon" :size="14" />
+                    {{ mode.label }}
+                  </button>
+                </div>
+                <div class="flex rounded-md border border-border bg-background p-1">
+                  <button
+                    v-for="average in movingAverageOptions"
+                    :key="average.period"
+                    type="button"
+                    class="h-8 rounded px-2.5 text-xs font-medium transition"
+                    :class="movingAveragePeriods.includes(average.period) ? 'bg-panel2 text-accent' : 'text-neutral-400 hover:text-neutral-100'"
+                    :title="average.label"
+                    @click="toggleMovingAverage(average.period)"
+                  >
+                    {{ average.shortLabel }}
+                  </button>
+                </div>
+                <div class="flex rounded-md border border-border bg-background p-1">
+                  <button
+                    v-for="drawing in chartDrawingModes"
+                    :key="drawing.value"
+                    type="button"
+                    class="h-8 rounded px-2.5 text-xs font-medium transition"
+                    :class="chartDrawingMode === drawing.value ? 'bg-panel2 text-accent' : 'text-neutral-400 hover:text-neutral-100'"
+                    :title="drawing.label"
+                    @click="chartDrawingMode = drawing.value"
+                  >
+                    {{ drawing.shortLabel }}
+                  </button>
+                </div>
+                <button
+                  class="inline-flex h-10 items-center gap-1 rounded-md border border-border px-2.5 text-xs font-medium text-neutral-400 hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+                  type="button"
+                  title="サポート/レジスタンスラインを削除"
+                  :disabled="selectedChartGuideLines.length === 0"
+                  @click="clearSelectedChartGuideLines"
+                >
+                  <X :size="14" />ライン
+                </button>
               </div>
 
               <div class="h-[320px] p-4">
-                <SparklineChart :points="history" :mode="chartMode" :moving-averages="movingAveragePeriods" />
+                <SparklineChart
+                  :points="history"
+                  :mode="chartMode"
+                  :moving-averages="movingAveragePeriods"
+                  :drawing-mode="chartDrawingMode"
+                  :guide-lines="selectedChartGuideLines"
+                  @update:guide-lines="setSelectedChartGuideLines"
+                />
               </div>
 
               <div class="grid gap-3 px-4 pb-4 sm:grid-cols-3">
@@ -204,10 +236,14 @@
               <section class="border-t border-border px-4 py-4">
                 <div class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <h3 class="text-sm font-semibold text-neutral-200">保有・収支</h3>
-                  <form class="grid gap-2 sm:grid-cols-[130px_120px_100px_minmax(120px,1fr)_auto]" @submit.prevent="addPurchase">
+                  <form
+                    class="grid gap-2"
+                    :class="isStockPurchaseInput ? 'sm:grid-cols-[130px_120px_100px_minmax(120px,1fr)_auto]' : 'sm:grid-cols-[130px_140px_minmax(120px,1fr)_auto]'"
+                    @submit.prevent="addPurchase"
+                  >
                     <input v-model="purchaseDate" class="h-9 rounded-md border border-border bg-background px-2 text-xs outline-none focus:border-accent" type="date" />
                     <input v-model.number="purchaseAmount" class="h-9 rounded-md border border-border bg-background px-2 text-xs outline-none focus:border-accent" min="0" step="0.01" type="number" :placeholder="purchaseAmountPlaceholder" />
-                    <input v-model.number="purchaseQuantity" class="h-9 rounded-md border border-border bg-background px-2 text-xs outline-none focus:border-accent" min="0" step="0.0001" type="number" placeholder="数量" />
+                    <input v-if="isStockPurchaseInput" v-model.number="purchaseQuantity" class="h-9 rounded-md border border-border bg-background px-2 text-xs outline-none focus:border-accent" min="0" step="0.0001" type="number" placeholder="数量" />
                     <input v-model="purchaseNote" class="h-9 rounded-md border border-border bg-background px-2 text-xs outline-none focus:border-accent" placeholder="メモ" />
                     <button class="inline-flex h-9 items-center gap-1 rounded-md bg-accent px-3 text-xs font-semibold text-neutral-950 hover:bg-sky-300" type="submit">
                       <Plus :size="14" />追加
@@ -217,7 +253,7 @@
 
                 <div class="grid gap-3 sm:grid-cols-4">
                   <Metric label="投資額" :value="moneyValue(position.totalCost, selectedSymbol.currency)" />
-                  <Metric label="保有数量" :value="number(position.totalQuantity)" />
+                  <Metric :label="isStockPurchaseInput ? '保有数量' : '評価用数量'" :value="number(position.totalQuantity)" />
                   <Metric label="評価額" :value="moneyValue(position.marketValue, selectedSymbol.currency)" />
                   <Metric label="評価損益" :value="moneyValue(position.profitLoss, selectedSymbol.currency)" :tone="position.profitLoss" />
                 </div>
@@ -228,8 +264,8 @@
                       <tr>
                         <th class="px-3 py-2 font-medium">日付</th>
                         <th class="px-3 py-2 font-medium">購入額</th>
-                        <th class="px-3 py-2 font-medium">数量</th>
-                        <th class="px-3 py-2 font-medium">単価</th>
+                        <th class="px-3 py-2 font-medium">{{ isStockPurchaseInput ? '数量' : '評価用数量' }}</th>
+                        <th class="px-3 py-2 font-medium">{{ isStockPurchaseInput ? '単価' : '購入基準価額' }}</th>
                         <th class="px-3 py-2 font-medium">メモ</th>
                         <th class="px-3 py-2 font-medium"></th>
                       </tr>
@@ -321,6 +357,162 @@
         </section>
       </section>
 
+      <section v-else-if="activeTab === 'tasks'" class="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-5 px-4 py-5 sm:px-6 lg:px-8">
+        <header class="flex flex-col gap-4 border-b border-border pb-5 xl:flex-row xl:items-end xl:justify-between">
+          <div>
+            <p class="text-sm font-medium text-accent">Pleiades</p>
+            <h1 class="mt-1 text-2xl font-semibold tracking-normal text-neutral-50 sm:text-3xl">タスク管理</h1>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <div class="flex rounded-md border border-border bg-panel p-1">
+              <button
+                v-for="option in taskSortOptions"
+                :key="option.value"
+                type="button"
+                class="inline-flex h-9 items-center gap-1.5 rounded px-3 text-xs font-medium transition"
+                :class="taskSort === option.value ? 'bg-panel2 text-accent' : 'text-neutral-400 hover:text-neutral-100'"
+                @click="taskSort = option.value"
+              >
+                <ArrowUpDown :size="14" />{{ option.label }}
+              </button>
+            </div>
+            <button class="inline-flex h-10 items-center gap-2 rounded-md border border-border bg-panel px-3 text-sm font-medium text-neutral-100 transition hover:border-accent" type="button" @click="loadTaskData">
+              <RefreshCw :size="17" />再読込
+            </button>
+          </div>
+        </header>
+
+        <p v-if="taskError" class="rounded-md border border-loss/40 bg-loss/10 px-3 py-2 text-sm text-red-200">{{ taskError }}</p>
+
+        <div class="grid gap-5 xl:grid-cols-[minmax(280px,360px)_minmax(0,1fr)]">
+          <section class="rounded-md border border-border bg-panel">
+            <div class="border-b border-border px-4 py-3">
+              <h2 class="text-sm font-semibold text-neutral-200">{{ editingTask ? 'タスク編集' : 'タスク追加' }}</h2>
+            </div>
+            <form class="grid gap-3 p-4" @submit.prevent="saveTask">
+              <input v-model="taskTitle" class="h-10 rounded-md border border-border bg-background px-3 text-sm outline-none focus:border-accent" placeholder="名前" />
+              <div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
+                <select v-model="taskStatus" class="h-10 rounded-md border border-border bg-background px-3 text-sm outline-none focus:border-accent">
+                  <option value="todo">開始前</option>
+                  <option value="doing">進行中</option>
+                  <option value="done">完了</option>
+                </select>
+                <input v-model="taskDueDate" class="h-10 rounded-md border border-border bg-background px-3 text-sm outline-none focus:border-accent" type="date" />
+              </div>
+              <input v-model.number="taskDurationDays" class="h-10 rounded-md border border-border bg-background px-3 text-sm outline-none focus:border-accent" min="0" step="1" type="number" placeholder="継続期間（日）" />
+              <textarea v-model="taskDetails" class="min-h-28 resize-y rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent" placeholder="詳細"></textarea>
+              <div class="flex flex-wrap gap-2">
+                <label
+                  v-for="tag in taskTags"
+                  :key="tag.id"
+                  class="inline-flex h-8 cursor-pointer items-center gap-2 rounded border border-border px-2 text-xs text-neutral-200"
+                  :class="selectedTaskTagIds.includes(tag.id) ? 'bg-panel2' : 'bg-background opacity-70'"
+                >
+                  <input v-model="selectedTaskTagIds" class="sr-only" type="checkbox" :value="tag.id" />
+                  <span class="h-2.5 w-2.5 rounded-full" :style="{ backgroundColor: tag.color }"></span>
+                  <span>{{ tag.name }}</span>
+                </label>
+              </div>
+              <div class="flex gap-2">
+                <button class="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-neutral-950 transition hover:bg-sky-300" type="submit">
+                  <Plus v-if="!editingTask" :size="17" />
+                  <CheckCircle2 v-else :size="17" />
+                  {{ editingTask ? '保存' : '追加' }}
+                </button>
+                <button v-if="editingTask" class="h-10 rounded-md border border-border px-3 text-sm font-medium text-neutral-200 hover:border-accent" type="button" @click="resetTaskForm">取消</button>
+              </div>
+            </form>
+
+            <div class="border-t border-border px-4 py-3">
+              <h2 class="text-sm font-semibold text-neutral-200">タグ</h2>
+            </div>
+            <form class="grid grid-cols-[1fr_44px_auto] gap-2 px-4 pb-4" @submit.prevent="addTaskTag">
+              <input v-model="newTaskTagName" class="h-9 min-w-0 rounded-md border border-border bg-background px-2 text-xs outline-none focus:border-accent" placeholder="タグ名" />
+              <input v-model="newTaskTagColor" class="h-9 w-11 rounded-md border border-border bg-background p-1" type="color" />
+              <button class="inline-flex h-9 items-center gap-1 rounded-md border border-border px-2 text-xs font-medium text-neutral-200 hover:border-accent" type="submit">
+                <Plus :size="14" />追加
+              </button>
+            </form>
+            <div class="grid gap-2 px-4 pb-4">
+              <div v-for="tag in taskTags" :key="tag.id" class="grid grid-cols-[auto_1fr_auto_auto] items-center gap-2 rounded-md border border-border bg-background px-2 py-2">
+                <span class="h-3 w-3 rounded-full" :style="{ backgroundColor: tag.color }"></span>
+                <span class="truncate text-sm" :class="tag.hidden ? 'text-neutral-500' : 'text-neutral-200'">{{ tag.name }}</span>
+                <button class="flex h-8 w-8 items-center justify-center rounded-md border border-border text-neutral-400 hover:border-accent hover:text-accent" type="button" :title="tag.hidden ? '表示' : '非表示'" @click="toggleTaskTagHidden(tag)">
+                  <EyeOff :size="14" />
+                </button>
+                <button class="flex h-8 w-8 items-center justify-center rounded-md border border-border text-neutral-400 hover:border-loss hover:text-loss" type="button" title="削除" @click="removeTaskTag(tag)">
+                  <Trash2 :size="14" />
+                </button>
+              </div>
+              <p v-if="taskTags.length === 0" class="text-sm text-neutral-500">タグはありません</p>
+            </div>
+          </section>
+
+          <section class="min-w-0 rounded-md border border-border bg-panel">
+            <div class="flex items-center justify-between border-b border-border px-4 py-3">
+              <h2 class="text-sm font-semibold text-neutral-200">一覧</h2>
+              <span class="text-xs text-neutral-500">{{ visibleTasks.length }}件</span>
+            </div>
+            <div class="grid gap-3 p-4">
+              <article v-for="task in activeTasks" :key="task.id" class="rounded-md border border-border bg-background p-3">
+                <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <button class="min-w-0 text-left" type="button" @click="editTask(task)">
+                    <h3 class="truncate text-base font-semibold text-neutral-100">{{ task.title }}</h3>
+                    <p class="mt-1 line-clamp-2 text-sm text-neutral-400">{{ task.details || '詳細なし' }}</p>
+                  </button>
+                  <div class="flex shrink-0 items-center gap-2">
+                    <select class="h-9 rounded-md border border-border bg-panel px-2 text-xs outline-none focus:border-accent" :value="task.status" @change="changeTaskStatus(task, ($event.target as HTMLSelectElement).value as TaskStatus)">
+                      <option value="todo">開始前</option>
+                      <option value="doing">進行中</option>
+                      <option value="done">完了</option>
+                    </select>
+                    <button class="flex h-9 w-9 items-center justify-center rounded-md border border-border text-neutral-400 hover:border-loss hover:text-loss" type="button" title="削除" @click="removeTask(task)">
+                      <Trash2 :size="15" />
+                    </button>
+                  </div>
+                </div>
+                <div class="mt-3 flex flex-wrap items-center gap-2 text-xs text-neutral-500">
+                  <span class="inline-flex items-center gap-1 rounded border border-border px-2 py-1">
+                    <Circle :size="12" :class="taskStatusClass(task.status)" />{{ taskStatusLabel(task.status) }}
+                  </span>
+                  <span v-if="task.due_date" class="inline-flex items-center gap-1 rounded border border-border px-2 py-1">
+                    <Calendar :size="12" />{{ task.due_date }}
+                  </span>
+                  <span v-if="task.duration_days !== null" class="inline-flex items-center gap-1 rounded border border-border px-2 py-1">
+                    <Clock3 :size="12" />{{ task.duration_days }}日
+                  </span>
+                  <span v-for="tag in task.tags" :key="tag.id" class="inline-flex items-center gap-1 rounded border border-border px-2 py-1">
+                    <span class="h-2 w-2 rounded-full" :style="{ backgroundColor: tag.color }"></span>{{ tag.name }}
+                  </span>
+                </div>
+              </article>
+              <p v-if="activeTasks.length === 0" class="rounded-md border border-border bg-background px-4 py-8 text-center text-sm text-neutral-500">未完了タスクはありません</p>
+            </div>
+
+            <div class="border-t border-border px-4 py-3">
+              <h2 class="text-sm font-semibold text-neutral-200">完了</h2>
+            </div>
+            <div class="grid gap-2 p-4 pt-0">
+              <article v-for="task in completedTasks" :key="task.id" class="grid gap-2 rounded-md border border-border/70 bg-background px-3 py-3 sm:grid-cols-[1fr_auto] sm:items-center">
+                <button class="min-w-0 text-left" type="button" @click="editTask(task)">
+                  <h3 class="truncate text-sm font-semibold text-neutral-300">{{ task.title }}</h3>
+                  <p class="mt-1 text-xs text-neutral-500">{{ formatDateTime(task.completed_at) }}</p>
+                </button>
+                <div class="flex items-center gap-2">
+                  <button class="inline-flex h-8 items-center gap-1 rounded-md border border-border px-2 text-xs text-neutral-300 hover:border-accent" type="button" @click="changeTaskStatus(task, 'doing')">
+                    <RefreshCw :size="13" />再開
+                  </button>
+                  <button class="flex h-8 w-8 items-center justify-center rounded-md border border-border text-neutral-400 hover:border-loss hover:text-loss" type="button" title="削除" @click="removeTask(task)">
+                    <Trash2 :size="13" />
+                  </button>
+                </div>
+              </article>
+              <p v-if="completedTasks.length === 0" class="rounded-md border border-border bg-background px-4 py-6 text-center text-sm text-neutral-500">完了タスクはありません</p>
+            </div>
+          </section>
+        </div>
+      </section>
+
       <section v-else class="mx-auto flex min-h-screen max-w-5xl items-center justify-center px-6">
         <div class="w-full rounded-md border border-border bg-panel p-6">
           <component :is="currentTab?.icon" class="mb-4 text-accent" :size="28" />
@@ -354,11 +546,17 @@
 import { computed, defineComponent, h, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   AlertTriangle,
+  ArrowUpDown,
   BriefcaseBusiness,
+  Calendar,
   ChartCandlestick,
   ChartLine,
+  CheckCircle2,
   ChevronDown,
   ChevronUp,
+  Circle,
+  Clock3,
+  EyeOff,
   GripVertical,
   Home,
   Layers,
@@ -372,22 +570,33 @@ import {
 import SparklineChart from './components/SparklineChart.vue'
 import {
   createSymbol,
+  createTask,
+  createTaskTag,
   cancelRefreshJob,
   createPurchase,
   deleteSymbol,
   deletePurchase,
+  deleteTask,
+  deleteTaskTag,
   getHistory,
   listRefreshJobs,
   listPurchases,
   listSymbols,
+  listTaskTags,
+  listTasks,
   reorderSymbols,
   refreshAll,
   refreshSymbol,
+  updateTask,
+  updateTaskTag,
   updateSymbol,
   type PricePoint,
   type Purchase,
   type RefreshJob,
-  type SymbolRow
+  type SymbolRow,
+  type Task,
+  type TaskStatus,
+  type TaskTag
 } from './lib/api'
 
 const Metric = defineComponent({
@@ -435,6 +644,27 @@ const movingAverageOptions = [
   { period: 25, label: '25日移動平均線', shortLabel: '25日' },
   { period: 75, label: '75日移動平均線', shortLabel: '75日' }
 ]
+const chartDrawingModes = [
+  { value: 'none' as const, label: '通常操作', shortLabel: '通常' },
+  { value: 'support' as const, label: 'サポートラインを描画', shortLabel: '支持' },
+  { value: 'resistance' as const, label: 'レジスタンスラインを描画', shortLabel: '抵抗' }
+]
+const taskSortOptions = [
+  { value: 'due' as const, label: '期限' },
+  { value: 'title' as const, label: '名前' },
+  { value: 'tag' as const, label: 'タグ' }
+]
+
+type ChartDrawingMode = (typeof chartDrawingModes)[number]['value']
+type TaskSort = (typeof taskSortOptions)[number]['value']
+type ChartGuideLine = {
+  id: string
+  type: 'support' | 'resistance'
+  startRatio: number
+  endRatio: number
+  startValue: number
+  endValue: number
+}
 
 const activeTab = ref('invest')
 const mobileOpen = ref(false)
@@ -444,6 +674,8 @@ const history = ref<PricePoint[]>([])
 const activeRange = ref('1y')
 const chartMode = ref<(typeof chartModes)[number]['value']>('line')
 const movingAveragePeriods = ref<number[]>([])
+const chartDrawingMode = ref<ChartDrawingMode>('none')
+const chartGuideLinesBySymbol = ref<Record<number, ChartGuideLine[]>>({})
 const newTicker = ref('')
 const newAssetType = ref('stock')
 const refreshing = ref(false)
@@ -459,10 +691,25 @@ const purchaseNote = ref('')
 const activeSymbolTag = ref('すべて')
 const tagDraft = ref('')
 const draggingSymbolId = ref<number | null>(null)
+const tasks = ref<Task[]>([])
+const taskTags = ref<TaskTag[]>([])
+const taskError = ref('')
+const taskSort = ref<TaskSort>('due')
+const editingTaskId = ref<number | null>(null)
+const taskTitle = ref('')
+const taskStatus = ref<TaskStatus>('todo')
+const taskDueDate = ref('')
+const taskDurationDays = ref<number | null>(null)
+const taskDetails = ref('')
+const selectedTaskTagIds = ref<number[]>([])
+const newTaskTagName = ref('')
+const newTaskTagColor = ref('#7dd3fc')
 let jobsTimer: number | undefined
 
 const selectedSymbol = computed(() => symbols.value.find((symbol) => symbol.id === selectedId.value) ?? null)
+const selectedChartGuideLines = computed(() => (selectedId.value ? chartGuideLinesBySymbol.value[selectedId.value] ?? [] : []))
 const currentTab = computed(() => tabs.find((tab) => tab.key === activeTab.value))
+const editingTask = computed(() => tasks.value.find((task) => task.id === editingTaskId.value) ?? null)
 const symbolTags = computed(() => {
   const tags = Array.from(new Set(symbols.value.map((symbol) => symbol.tag || 'ウォッチリスト'))).sort((a, b) =>
     a.localeCompare(b, 'ja')
@@ -471,6 +718,14 @@ const symbolTags = computed(() => {
 })
 const visibleSymbols = computed(() =>
   activeSymbolTag.value === 'すべて' ? symbols.value : symbols.value.filter((symbol) => symbol.tag === activeSymbolTag.value)
+)
+const visibleTasks = computed(() => tasks.value.filter((task) => !task.tags.some((tag) => tag.hidden)))
+const sortedVisibleTasks = computed(() => [...visibleTasks.value].sort(compareTasks))
+const activeTasks = computed(() => sortedVisibleTasks.value.filter((task) => task.status !== 'done'))
+const completedTasks = computed(() =>
+  sortedVisibleTasks.value
+    .filter((task) => task.status === 'done')
+    .sort((a, b) => (b.completed_at ?? '').localeCompare(a.completed_at ?? '') || b.id - a.id)
 )
 const totalReturn = computed(() => history.value[history.value.length - 1]?.return_percent ?? null)
 const isStockPurchaseInput = computed(() => selectedSymbol.value?.asset_type === 'stock')
@@ -493,6 +748,7 @@ watch(selectedSymbol, (symbol) => {
 
 onMounted(async () => {
   await load()
+  await loadTaskData()
   await loadJobs()
   jobsTimer = window.setInterval(loadJobs, 5000)
 })
@@ -530,6 +786,20 @@ async function loadPurchases() {
   purchases.value = await listPurchases(selectedId.value)
 }
 
+async function loadTaskData() {
+  try {
+    taskError.value = ''
+    const [loadedTags, loadedTasks] = await Promise.all([listTaskTags(), listTasks()])
+    taskTags.value = loadedTags
+    tasks.value = loadedTasks
+    if (editingTaskId.value && !tasks.value.some((task) => task.id === editingTaskId.value)) {
+      resetTaskForm()
+    }
+  } catch (err) {
+    taskError.value = err instanceof Error ? err.message : 'タスクの読み込みに失敗しました'
+  }
+}
+
 async function selectSymbol(id: number) {
   selectedId.value = id
   await loadHistory()
@@ -545,6 +815,18 @@ function toggleMovingAverage(period: number) {
   movingAveragePeriods.value = movingAveragePeriods.value.includes(period)
     ? movingAveragePeriods.value.filter((value) => value !== period)
     : [...movingAveragePeriods.value, period]
+}
+
+function setSelectedChartGuideLines(lines: ChartGuideLine[]) {
+  if (!selectedId.value) return
+  chartGuideLinesBySymbol.value = {
+    ...chartGuideLinesBySymbol.value,
+    [selectedId.value]: lines
+  }
+}
+
+function clearSelectedChartGuideLines() {
+  setSelectedChartGuideLines([])
 }
 
 async function addSymbol() {
@@ -665,16 +947,19 @@ async function cancelJob(jobId: number) {
 }
 
 async function addPurchase() {
-  if (!selectedSymbol.value || !purchaseAmount.value || !purchaseQuantity.value) return
+  if (!selectedSymbol.value || !purchaseAmount.value) return
+  if (isStockPurchaseInput.value && !purchaseQuantity.value) return
   try {
     error.value = ''
-    const amount = isStockPurchaseInput.value ? purchaseAmount.value * purchaseQuantity.value : purchaseAmount.value
-    await createPurchase(selectedSymbol.value.id, {
+    const payload: { purchased_at: string; amount: number; quantity?: number; note?: string } = {
       purchased_at: purchaseDate.value,
-      amount,
-      quantity: purchaseQuantity.value,
+      amount: isStockPurchaseInput.value ? purchaseAmount.value * purchaseQuantity.value! : purchaseAmount.value,
       note: purchaseNote.value || undefined
-    })
+    }
+    if (isStockPurchaseInput.value) {
+      payload.quantity = purchaseQuantity.value!
+    }
+    await createPurchase(selectedSymbol.value.id, payload)
     purchaseAmount.value = null
     purchaseQuantity.value = null
     purchaseNote.value = ''
@@ -694,11 +979,148 @@ async function removePurchase(id: number) {
   }
 }
 
+function taskPayload() {
+  return {
+    title: taskTitle.value.trim(),
+    status: taskStatus.value,
+    due_date: taskDueDate.value || null,
+    duration_days: taskDurationDays.value === null || Number.isNaN(taskDurationDays.value) ? null : taskDurationDays.value,
+    tag_ids: selectedTaskTagIds.value,
+    details: taskDetails.value
+  }
+}
+
+async function saveTask() {
+  const payload = taskPayload()
+  if (!payload.title) return
+  try {
+    taskError.value = ''
+    if (editingTaskId.value) {
+      await updateTask(editingTaskId.value, payload)
+    } else {
+      await createTask(payload)
+    }
+    resetTaskForm()
+    await loadTaskData()
+  } catch (err) {
+    taskError.value = err instanceof Error ? err.message : 'タスクの保存に失敗しました'
+  }
+}
+
+function editTask(task: Task) {
+  editingTaskId.value = task.id
+  taskTitle.value = task.title
+  taskStatus.value = task.status
+  taskDueDate.value = task.due_date ?? ''
+  taskDurationDays.value = task.duration_days
+  taskDetails.value = task.details
+  selectedTaskTagIds.value = task.tags.map((tag) => tag.id)
+}
+
+function resetTaskForm() {
+  editingTaskId.value = null
+  taskTitle.value = ''
+  taskStatus.value = 'todo'
+  taskDueDate.value = ''
+  taskDurationDays.value = null
+  taskDetails.value = ''
+  selectedTaskTagIds.value = []
+}
+
+async function changeTaskStatus(task: Task, status: TaskStatus) {
+  try {
+    taskError.value = ''
+    await updateTask(task.id, { status })
+    await loadTaskData()
+  } catch (err) {
+    taskError.value = err instanceof Error ? err.message : '進行度の更新に失敗しました'
+  }
+}
+
+async function removeTask(task: Task) {
+  if (!window.confirm(`${task.title} を削除しますか？`)) return
+  try {
+    taskError.value = ''
+    await deleteTask(task.id)
+    await loadTaskData()
+  } catch (err) {
+    taskError.value = err instanceof Error ? err.message : 'タスクの削除に失敗しました'
+  }
+}
+
+async function addTaskTag() {
+  const name = newTaskTagName.value.trim()
+  if (!name) return
+  try {
+    taskError.value = ''
+    await createTaskTag({ name, color: newTaskTagColor.value })
+    newTaskTagName.value = ''
+    await loadTaskData()
+  } catch (err) {
+    taskError.value = err instanceof Error ? err.message : 'タグの追加に失敗しました'
+  }
+}
+
+async function toggleTaskTagHidden(tag: TaskTag) {
+  try {
+    taskError.value = ''
+    await updateTaskTag(tag.id, { hidden: !tag.hidden })
+    await loadTaskData()
+  } catch (err) {
+    taskError.value = err instanceof Error ? err.message : 'タグの表示設定に失敗しました'
+  }
+}
+
+async function removeTaskTag(tag: TaskTag) {
+  if (!window.confirm(`${tag.name} を削除しますか？`)) return
+  try {
+    taskError.value = ''
+    await deleteTaskTag(tag.id)
+    selectedTaskTagIds.value = selectedTaskTagIds.value.filter((tagId) => tagId !== tag.id)
+    await loadTaskData()
+  } catch (err) {
+    taskError.value = err instanceof Error ? err.message : 'タグの削除に失敗しました'
+  }
+}
+
 async function removeSelected() {
   if (!selectedSymbol.value || !window.confirm(`${selectedSymbol.value.ticker} を削除しますか？`)) return
   await deleteSymbol(selectedSymbol.value.id)
   selectedId.value = null
   await load()
+}
+
+function compareTasks(a: Task, b: Task) {
+  if (taskSort.value === 'title') {
+    return a.title.localeCompare(b.title, 'ja') || a.id - b.id
+  }
+  if (taskSort.value === 'tag') {
+    return taskTagSortKey(a).localeCompare(taskTagSortKey(b), 'ja') || a.title.localeCompare(b.title, 'ja') || a.id - b.id
+  }
+  return taskDueSortKey(a).localeCompare(taskDueSortKey(b)) || a.title.localeCompare(b.title, 'ja') || a.id - b.id
+}
+
+function taskDueSortKey(task: Task) {
+  return task.due_date || '9999-12-31'
+}
+
+function taskTagSortKey(task: Task) {
+  return task.tags.map((tag) => tag.name).sort((a, b) => a.localeCompare(b, 'ja'))[0] ?? '~~~~'
+}
+
+function taskStatusLabel(status: TaskStatus) {
+  const labels: Record<TaskStatus, string> = {
+    todo: '開始前',
+    doing: '進行中',
+    done: '完了'
+  }
+  return labels[status]
+}
+
+function taskStatusClass(status: TaskStatus) {
+  if (status === 'done') return 'text-gain'
+  if (status === 'doing') return 'text-accent'
+  return 'text-neutral-500'
 }
 
 function money(value: number | null, currency: string | null) {
@@ -763,9 +1185,10 @@ function canCancelJob(job: RefreshJob) {
 
 function formatTime(value: string | null) {
   if (!value) return ''
-  const date = new Date(value)
+  const date = parseUtcDate(value)
   if (Number.isNaN(date.getTime())) return value
   return new Intl.DateTimeFormat('ja-JP', {
+    timeZone: 'Asia/Tokyo',
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
@@ -775,14 +1198,22 @@ function formatTime(value: string | null) {
 
 function formatDateTime(value: string | null) {
   if (!value) return 'N/A'
-  const date = new Date(value)
+  const date = parseUtcDate(value)
   if (Number.isNaN(date.getTime())) return value
   return new Intl.DateTimeFormat('ja-JP', {
+    timeZone: 'Asia/Tokyo',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit'
   }).format(date)
+}
+
+function parseUtcDate(value: string) {
+  if (/[zZ]$|[+-]\d{2}:?\d{2}$/.test(value)) {
+    return new Date(value)
+  }
+  return new Date(`${value.replace(' ', 'T')}Z`)
 }
 </script>

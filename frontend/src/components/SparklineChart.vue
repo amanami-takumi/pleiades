@@ -66,6 +66,33 @@
       stroke-linecap="round"
       stroke-linejoin="round"
     />
+    <g v-for="line in mappedGuideLines" :key="line.id">
+      <line
+        :x1="line.x1"
+        :y1="line.y1"
+        :x2="line.x2"
+        :y2="line.y2"
+        :stroke="line.color"
+        stroke-width="2"
+        stroke-dasharray="6 4"
+        stroke-linecap="round"
+      />
+      <text :x="line.labelX" :y="line.labelY" :fill="line.color" font-size="11" font-weight="600">
+        {{ line.label }}
+      </text>
+    </g>
+    <line
+      v-if="draftGuideLine"
+      :x1="draftGuideLine.x1"
+      :y1="draftGuideLine.y1"
+      :x2="draftGuideLine.x2"
+      :y2="draftGuideLine.y2"
+      :stroke="draftGuideLine.color"
+      stroke-width="2"
+      stroke-dasharray="3 3"
+      stroke-linecap="round"
+      opacity="0.75"
+    />
     <circle v-if="mode === 'line' && lastPoint" :cx="lastPoint.x" :cy="lastPoint.y" r="5" :fill="stroke" />
     <g v-if="hoverEntry">
       <line :x1="hoverEntry.x" :y1="plot.top" :x2="hoverEntry.x" :y2="plot.bottom" stroke="#7dd3fc" stroke-width="1" stroke-dasharray="4 4" />
@@ -98,7 +125,11 @@
       :width="plotWidth"
       :height="plotHeight"
       fill="transparent"
+      :style="{ cursor: drawingMode === 'none' ? 'default' : 'crosshair' }"
+      @pointerdown="handlePointerDown"
       @pointermove="handlePointerMove"
+      @pointerup="handlePointerUp"
+      @pointercancel="cancelGuideLineDraft"
     />
     <text v-if="!hasVisibleData" x="390" y="144" text-anchor="middle" fill="#8e99a3" font-size="14">データ未取得</text>
   </svg>
@@ -108,10 +139,25 @@
 import { computed, ref } from 'vue'
 import type { PricePoint } from '../lib/api'
 
+export type ChartGuideLine = {
+  id: string
+  type: 'support' | 'resistance'
+  startRatio: number
+  endRatio: number
+  startValue: number
+  endValue: number
+}
+
 const props = defineProps<{
   points: PricePoint[]
   mode?: 'line' | 'candlestick'
   movingAverages?: number[]
+  drawingMode?: 'none' | 'support' | 'resistance'
+  guideLines?: ChartGuideLine[]
+}>()
+
+const emit = defineEmits<{
+  'update:guideLines': [guideLines: ChartGuideLine[]]
 }>()
 
 const MOVING_AVERAGE_CONFIG = [
@@ -131,7 +177,9 @@ const plotHeight = plot.bottom - plot.top
 const svgRef = ref<SVGSVGElement | null>(null)
 const hoverIndex = ref<number | null>(null)
 const mode = computed(() => props.mode ?? 'line')
+const drawingMode = computed(() => props.drawingMode ?? 'none')
 const activeMovingAverages = computed(() => new Set(props.movingAverages ?? []))
+const guideLineDraft = ref<ChartGuideLine | null>(null)
 
 const chartPoints = computed(() => props.points.filter((point) => point.close !== null))
 const candlePoints = computed(() =>
@@ -167,6 +215,8 @@ const movingAverageLines = computed(() =>
     })
     .filter((average) => average.path)
 )
+const mappedGuideLines = computed(() => (props.guideLines ?? []).map(mapGuideLine))
+const draftGuideLine = computed(() => (guideLineDraft.value ? mapGuideLine(guideLineDraft.value) : null))
 
 const candles = computed(() => {
   const points = candlePoints.value
@@ -297,6 +347,51 @@ function scaleToY(value: number) {
   return plot.bottom - ((value - scale.value.min) / scale.value.span) * plotHeight
 }
 
+function yToValue(y: number) {
+  return scale.value.max - ((y - plot.top) / plotHeight) * scale.value.span
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max)
+}
+
+function pointerToPlotPoint(event: PointerEvent) {
+  if (!svgRef.value) return null
+  const point = svgRef.value.createSVGPoint()
+  point.x = event.clientX
+  point.y = event.clientY
+  const matrix = svgRef.value.getScreenCTM()
+  if (!matrix) return null
+  const cursor = point.matrixTransform(matrix.inverse())
+  const x = clamp(cursor.x, plot.left, plot.right)
+  const y = clamp(cursor.y, plot.top, plot.bottom)
+  return {
+    x,
+    y,
+    ratio: (x - plot.left) / plotWidth,
+    value: yToValue(y)
+  }
+}
+
+function mapGuideLine(line: ChartGuideLine) {
+  const x1 = plot.left + line.startRatio * plotWidth
+  const x2 = plot.left + line.endRatio * plotWidth
+  const y1 = scaleToY(line.startValue)
+  const y2 = scaleToY(line.endValue)
+  const color = line.type === 'support' ? '#22c55e' : '#fb7185'
+  return {
+    ...line,
+    x1,
+    y1,
+    x2,
+    y2,
+    color,
+    label: `${line.type === 'support' ? 'S' : 'R'} ${formatAxisNumber(line.endValue)}`,
+    labelX: clamp(Math.max(x1, x2) + 6, plot.left, plot.right - 54),
+    labelY: clamp(y2 - 6, plot.top + 12, plot.bottom - 4)
+  }
+}
+
 function buildMovingAveragePoints(period: number) {
   const points = chartPoints.value
   if (points.length < period) return []
@@ -319,14 +414,35 @@ function pointsToPath(points: { x: number; y: number }[]) {
   return points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(' ')
 }
 
+function handlePointerDown(event: PointerEvent) {
+  if (drawingMode.value === 'none') return
+  const point = pointerToPlotPoint(event)
+  if (!point) return
+  ;(event.currentTarget as SVGRectElement).setPointerCapture(event.pointerId)
+  hoverIndex.value = null
+  guideLineDraft.value = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    type: drawingMode.value,
+    startRatio: point.ratio,
+    endRatio: point.ratio,
+    startValue: point.value,
+    endValue: point.value
+  }
+}
+
 function handlePointerMove(event: PointerEvent) {
+  const draftPoint = pointerToPlotPoint(event)
+  if (guideLineDraft.value && draftPoint) {
+    guideLineDraft.value = {
+      ...guideLineDraft.value,
+      endRatio: draftPoint.ratio,
+      endValue: draftPoint.value
+    }
+    return
+  }
   if (!svgRef.value || entries.value.length === 0) return
-  const point = svgRef.value.createSVGPoint()
-  point.x = event.clientX
-  point.y = event.clientY
-  const matrix = svgRef.value.getScreenCTM()
-  if (!matrix) return
-  const cursor = point.matrixTransform(matrix.inverse())
+  const cursor = pointerToPlotPoint(event)
+  if (!cursor) return
   let nearestIndex = 0
   let nearestDistance = Number.POSITIVE_INFINITY
   entries.value.forEach((entry, index) => {
@@ -337,5 +453,23 @@ function handlePointerMove(event: PointerEvent) {
     }
   })
   hoverIndex.value = nearestIndex
+}
+
+function handlePointerUp(event: PointerEvent) {
+  if (!guideLineDraft.value) return
+  const target = event.currentTarget as SVGRectElement
+  if (target.hasPointerCapture(event.pointerId)) {
+    target.releasePointerCapture(event.pointerId)
+  }
+  const line = guideLineDraft.value
+  guideLineDraft.value = null
+  if (Math.abs(line.endRatio - line.startRatio) < 0.01 && Math.abs(line.endValue - line.startValue) < scale.value.span * 0.005) {
+    return
+  }
+  emit('update:guideLines', [...(props.guideLines ?? []), line])
+}
+
+function cancelGuideLineDraft() {
+  guideLineDraft.value = null
 }
 </script>

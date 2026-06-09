@@ -63,6 +63,30 @@ export type Purchase = {
   created_at: string
 }
 
+export type TaskStatus = 'todo' | 'doing' | 'done'
+
+export type TaskTag = {
+  id: number
+  name: string
+  color: string
+  hidden: boolean
+  created_at: string
+  updated_at: string
+}
+
+export type Task = {
+  id: number
+  title: string
+  status: TaskStatus
+  due_date: string | null
+  duration_days: number | null
+  tags: TaskTag[]
+  details: string
+  completed_at: string | null
+  created_at: string
+  updated_at: string
+}
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? ''
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -140,7 +164,7 @@ export function listPurchases(symbolId: number) {
   return request<Purchase[]>(`/api/symbols/${symbolId}/purchases`)
 }
 
-export function createPurchase(symbolId: number, payload: { purchased_at: string; amount: number; quantity: number; note?: string }) {
+export function createPurchase(symbolId: number, payload: { purchased_at: string; amount: number; quantity?: number; note?: string }) {
   return request<Purchase>(`/api/symbols/${symbolId}/purchases`, {
     method: 'POST',
     body: JSON.stringify(payload)
@@ -149,4 +173,65 @@ export function createPurchase(symbolId: number, payload: { purchased_at: string
 
 export function deletePurchase(id: number) {
   return request<void>(`/api/purchases/${id}`, { method: 'DELETE' })
+}
+
+export function listTaskTags() {
+  return request<TaskTag[]>('/api/task-tags')
+}
+
+export function createTaskTag(payload: { name: string; color: string }) {
+  return request<TaskTag>('/api/task-tags', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  })
+}
+
+export function updateTaskTag(id: number, payload: { name?: string; color?: string; hidden?: boolean }) {
+  return request<TaskTag>(`/api/task-tags/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload)
+  })
+}
+
+export function deleteTaskTag(id: number) {
+  return request<void>(`/api/task-tags/${id}`, { method: 'DELETE' })
+}
+
+export function listTasks() {
+  return request<Task[]>('/api/tasks')
+}
+
+export function createTask(payload: {
+  title: string
+  status: TaskStatus
+  due_date?: string | null
+  duration_days?: number | null
+  tag_ids: number[]
+  details: string
+}) {
+  return request<Task>('/api/tasks', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  })
+}
+
+export function updateTask(
+  id: number,
+  payload: Partial<{
+    title: string
+    status: TaskStatus
+    due_date: string | null
+    duration_days: number | null
+    tag_ids: number[]
+    details: string
+  }>
+) {
+  return request<Task>(`/api/tasks/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload)
+  })
+}
+
+export function deleteTask(id: number) {
+  return request<void>(`/api/tasks/${id}`, { method: 'DELETE' })
 }

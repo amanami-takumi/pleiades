@@ -96,6 +96,33 @@ def init_db() -> None:
               note TEXT,
               created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+
+            CREATE TABLE IF NOT EXISTS task_tags (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              name TEXT NOT NULL UNIQUE,
+              color TEXT NOT NULL DEFAULT '#7dd3fc',
+              hidden INTEGER NOT NULL DEFAULT 0,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS tasks (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              title TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'todo',
+              due_date TEXT,
+              duration_days INTEGER,
+              details TEXT NOT NULL DEFAULT '',
+              completed_at TEXT,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS task_tag_links (
+              task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+              tag_id INTEGER NOT NULL REFERENCES task_tags(id) ON DELETE CASCADE,
+              PRIMARY KEY (task_id, tag_id)
+            );
             """
         )
         ensure_column(db, "symbols", "tag", "TEXT NOT NULL DEFAULT 'ウォッチリスト'")
@@ -103,6 +130,8 @@ def init_db() -> None:
         ensure_column(db, "symbols", "last_error", "TEXT")
         ensure_column(db, "symbols", "last_refreshed_at", "TEXT")
         ensure_column(db, "refresh_jobs", "cancel_requested", "INTEGER NOT NULL DEFAULT 0")
+        ensure_column(db, "tasks", "duration_days", "INTEGER")
+        ensure_column(db, "tasks", "completed_at", "TEXT")
         db.execute("UPDATE symbols SET display_order = id WHERE display_order = 0")
 
 

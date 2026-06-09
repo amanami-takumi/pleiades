@@ -80,7 +80,7 @@ class RefreshJobOut(BaseModel):
 class PurchaseCreate(BaseModel):
     purchased_at: str = Field(min_length=1, max_length=20)
     amount: float = Field(gt=0)
-    quantity: float = Field(gt=0)
+    quantity: float | None = Field(default=None, gt=0)
     note: str | None = Field(default=None, max_length=200)
 
 
@@ -93,3 +93,54 @@ class PurchaseOut(BaseModel):
     unit_price: float
     note: str | None = None
     created_at: str
+
+
+class TaskTagCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    color: str = Field(default="#7dd3fc", min_length=4, max_length=20)
+
+
+class TaskTagUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    color: str | None = Field(default=None, min_length=4, max_length=20)
+    hidden: bool | None = None
+
+
+class TaskTagOut(BaseModel):
+    id: int
+    name: str
+    color: str
+    hidden: bool
+    created_at: str
+    updated_at: str
+
+
+class TaskCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=160)
+    status: str = Field(default="todo", pattern="^(todo|doing|done)$")
+    due_date: str | None = Field(default=None, max_length=20)
+    duration_days: int | None = Field(default=None, ge=0, le=36500)
+    tag_ids: list[int] = Field(default_factory=list)
+    details: str = Field(default="", max_length=5000)
+
+
+class TaskUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=160)
+    status: str | None = Field(default=None, pattern="^(todo|doing|done)$")
+    due_date: str | None = Field(default=None, max_length=20)
+    duration_days: int | None = Field(default=None, ge=0, le=36500)
+    tag_ids: list[int] | None = None
+    details: str | None = Field(default=None, max_length=5000)
+
+
+class TaskOut(BaseModel):
+    id: int
+    title: str
+    status: str
+    due_date: str | None = None
+    duration_days: int | None = None
+    tags: list[TaskTagOut]
+    details: str
+    completed_at: str | None = None
+    created_at: str
+    updated_at: str

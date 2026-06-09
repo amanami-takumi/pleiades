@@ -14,21 +14,21 @@ docker compose up --build
 
 ポートを変える場合は `.env` に `APP_PORT` と `BACKEND_PORT` を指定してください。
 
-## yfinance 取得間隔
+## 市場データ取得間隔
 
 Yahoo Finance 側のレート制限を避けるため、バックエンドは取得間隔とリトライ間隔を環境変数で調整できます。
 
 ```bash
-YFINANCE_REQUEST_INTERVAL_SECONDS=2
-YFINANCE_SYMBOL_INTERVAL_SECONDS=5
-YFINANCE_RETRY_COUNT=2
-YFINANCE_RATE_LIMIT_BACKOFF_SECONDS=60
+MARKET_REQUEST_INTERVAL_SECONDS=2
+MARKET_SYMBOL_INTERVAL_SECONDS=5
+MARKET_RETRY_COUNT=2
+MARKET_RATE_LIMIT_BACKOFF_SECONDS=60
 ```
 
 ## 実装済み
 
 - 左側の縦タブとスマホ右下メニュー
-- yfinance による指数・銘柄の取得
+- Yahoo Finance レスポンスの直接取得による指数・銘柄の保存
 - SQLite への価格履歴と指標保存
 - 週・月・年・3年・5年のチャート表示
 - PER、PBR、ROE、時価総額、配当利回りの表示
