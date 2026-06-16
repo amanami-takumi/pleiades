@@ -7,6 +7,7 @@ services:
     volumes:
       - ./backend:/usr/src/backend
       - ./data:/usr/src/data
+      - ./売買ルール.csv:/usr/src/売買ルール.csv:ro
     ports:
       - "${BACKEND_PORT:-5050}:5050"
     environment:

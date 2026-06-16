@@ -55,6 +55,70 @@ class HistoryOut(BaseModel):
     points: list[PricePoint]
 
 
+class AnalysisBacktestOut(BaseModel):
+    signals: int
+    correct: int
+    accuracy_percent: float | None = None
+    average_return_percent: float | None = None
+    average_abs_return_percent: float | None = None
+
+
+class AnalysisWeekdayStatOut(BaseModel):
+    weekday: int
+    label: str
+    market_sample_count: int
+    market_average_daily_return_percent: float | None = None
+    signal_count: int
+    signal_day_average_return_percent: float | None = None
+    average_return_1d_percent: float | None = None
+    average_return_3d_percent: float | None = None
+    average_return_5d_percent: float | None = None
+    interaction_effect_1d_percent: float | None = None
+    major_sq_week_market_sample_count: int = 0
+    major_sq_week_market_average_daily_return_percent: float | None = None
+    major_sq_week_signal_count: int = 0
+    major_sq_week_average_return_1d_percent: float | None = None
+    major_sq_week_average_return_3d_percent: float | None = None
+    major_sq_week_average_return_5d_percent: float | None = None
+    major_sq_week_interaction_effect_1d_percent: float | None = None
+
+
+class AnalysisRuleOut(BaseModel):
+    side: str
+    name: str
+    condition: str
+    description: str
+    supported: bool
+    current_signal_count: int
+    backtest: AnalysisBacktestOut
+    weekday_stats: list[AnalysisWeekdayStatOut] = Field(default_factory=list)
+
+
+class AnalysisSignalOut(BaseModel):
+    symbol_id: int
+    ticker: str
+    name: str
+    side: str
+    rule_name: str
+    date: str
+    close: float
+    reason: str
+    rsi_14: float | None = None
+    rsi_2: float | None = None
+
+
+class InvestmentAnalysisOut(BaseModel):
+    rules: list[AnalysisRuleOut]
+    signals: list[AnalysisSignalOut]
+    generated_at: str | None = None
+    horizon_days: int
+    lookback_years: int = 5
+    status: str = "not_calculated"
+    last_started_at: str | None = None
+    last_finished_at: str | None = None
+    error: str | None = None
+
+
 class RefreshOut(BaseModel):
     refreshed: list[str]
     errors: dict[str, str]

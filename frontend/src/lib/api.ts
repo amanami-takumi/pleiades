@@ -35,6 +35,70 @@ export type HistoryResponse = {
   points: PricePoint[]
 }
 
+export type AnalysisBacktest = {
+  signals: number
+  correct: number
+  accuracy_percent: number | null
+  average_return_percent: number | null
+  average_abs_return_percent: number | null
+}
+
+export type AnalysisWeekdayStat = {
+  weekday: number
+  label: string
+  market_sample_count: number
+  market_average_daily_return_percent: number | null
+  signal_count: number
+  signal_day_average_return_percent: number | null
+  average_return_1d_percent: number | null
+  average_return_3d_percent: number | null
+  average_return_5d_percent: number | null
+  interaction_effect_1d_percent: number | null
+  major_sq_week_market_sample_count: number
+  major_sq_week_market_average_daily_return_percent: number | null
+  major_sq_week_signal_count: number
+  major_sq_week_average_return_1d_percent: number | null
+  major_sq_week_average_return_3d_percent: number | null
+  major_sq_week_average_return_5d_percent: number | null
+  major_sq_week_interaction_effect_1d_percent: number | null
+}
+
+export type AnalysisRule = {
+  side: string
+  name: string
+  condition: string
+  description: string
+  supported: boolean
+  current_signal_count: number
+  backtest: AnalysisBacktest
+  weekday_stats: AnalysisWeekdayStat[]
+}
+
+export type AnalysisSignal = {
+  symbol_id: number
+  ticker: string
+  name: string
+  side: string
+  rule_name: string
+  date: string
+  close: number
+  reason: string
+  rsi_14: number | null
+  rsi_2: number | null
+}
+
+export type InvestmentAnalysis = {
+  rules: AnalysisRule[]
+  signals: AnalysisSignal[]
+  generated_at: string | null
+  horizon_days: number
+  lookback_years: number
+  status: string
+  last_started_at: string | null
+  last_finished_at: string | null
+  error: string | null
+}
+
 export type QueueResponse = {
   queued: number
   job_ids: number[]
@@ -117,6 +181,14 @@ export function listSymbols() {
 
 export function getHistory(id: number, range: string) {
   return request<HistoryResponse>(`/api/symbols/${id}/history?range=${range}`)
+}
+
+export function getInvestmentAnalysis() {
+  return request<InvestmentAnalysis>('/api/investment-support/analysis')
+}
+
+export function recalculateInvestmentAnalysis() {
+  return request<InvestmentAnalysis>('/api/investment-support/analysis/recalculate', { method: 'POST' })
 }
 
 export function createSymbol(ticker: string, name?: string, assetType = 'stock', tag?: string) {

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
@@ -10,9 +11,11 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from .database import get_db, init_db, seed_defaults
+from .investment_support import build_investment_analysis
 from .market import RANGE_TO_DAYS, normalize_ticker, refresh_symbols
 from .models import (
     HistoryOut,
+    InvestmentAnalysisOut,
     PricePoint,
     PurchaseCreate,
     PurchaseOut,
@@ -35,6 +38,10 @@ from .refresh_queue import RefreshQueue, cancel_refresh_job, enqueue_refresh_job
 refresh_queue = RefreshQueue()
 AUTO_REFRESH_TIMEZONE = ZoneInfo("Asia/Tokyo")
 AUTO_REFRESH_HOUR_JST = int(os.getenv("AUTO_REFRESH_HOUR_JST", "23"))
+INVESTMENT_ANALYSIS_HOUR_JST = int(os.getenv("INVESTMENT_ANALYSIS_HOUR_JST", "1"))
+INVESTMENT_ANALYSIS_HORIZON_DAYS = int(os.getenv("INVESTMENT_ANALYSIS_HORIZON_DAYS", "20"))
+INVESTMENT_ANALYSIS_LOOKBACK_YEARS = int(os.getenv("INVESTMENT_ANALYSIS_LOOKBACK_YEARS", "5"))
+investment_analysis_task: asyncio.Task | None = None
 
 
 async def daily_refresh_loop() -> None:
@@ -42,6 +49,15 @@ async def daily_refresh_loop() -> None:
         try:
             await asyncio.to_thread(_enqueue_if_stale)
             refresh_queue.notify()
+        except Exception:
+            pass
+        await asyncio.sleep(60 * 60)
+
+
+async def daily_investment_analysis_loop() -> None:
+    while True:
+        try:
+            await _start_investment_analysis_if_stale()
         except Exception:
             pass
         await asyncio.sleep(60 * 60)
@@ -68,14 +84,36 @@ def _enqueue_if_stale() -> None:
         )
 
 
+async def _start_investment_analysis_if_stale() -> None:
+    now_jst = datetime.now(AUTO_REFRESH_TIMEZONE)
+    if now_jst.hour != INVESTMENT_ANALYSIS_HOUR_JST:
+        return
+    analysis_date = now_jst.date().isoformat()
+    with get_db() as db:
+        row = db.execute("SELECT value FROM app_state WHERE key = 'last_investment_analysis_date_jst'").fetchone()
+        if row and row["value"] == analysis_date:
+            return
+        db.execute(
+            """
+            INSERT INTO app_state (key, value, updated_at)
+            VALUES ('last_investment_analysis_date_jst', ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+            """,
+            (analysis_date,),
+        )
+    await start_investment_analysis_recalculation()
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
     seed_defaults()
     refresh_queue.start()
-    task = asyncio.create_task(daily_refresh_loop())
+    refresh_task = asyncio.create_task(daily_refresh_loop())
+    analysis_task = asyncio.create_task(daily_investment_analysis_loop())
     yield
-    task.cancel()
+    refresh_task.cancel()
+    analysis_task.cancel()
     await refresh_queue.stop()
 
 
@@ -163,6 +201,137 @@ def list_symbols() -> list[SymbolOut]:
     with get_db() as db:
         rows = db.execute(f"{symbol_query()} ORDER BY s.display_order, s.id").fetchall()
     return [symbol_from_row(row) for row in rows]
+
+
+def load_all_symbols() -> list[SymbolOut]:
+    with get_db() as db:
+        rows = db.execute(f"{symbol_query()} ORDER BY s.display_order, s.id").fetchall()
+    return [symbol_from_row(row) for row in rows]
+
+
+def app_state_values(keys: list[str]) -> dict[str, str]:
+    if not keys:
+        return {}
+    placeholders = ",".join("?" for _ in keys)
+    with get_db() as db:
+        rows = db.execute(f"SELECT key, value FROM app_state WHERE key IN ({placeholders})", keys).fetchall()
+    return {row["key"]: row["value"] for row in rows}
+
+
+def set_app_state(values: dict[str, str]) -> None:
+    with get_db() as db:
+        for key, value in values.items():
+            db.execute(
+                """
+                INSERT INTO app_state (key, value, updated_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+                """,
+                (key, value),
+            )
+
+
+def get_cached_investment_analysis() -> InvestmentAnalysisOut:
+    values = app_state_values(
+        [
+            "investment_analysis_payload",
+            "investment_analysis_status",
+            "investment_analysis_error",
+            "investment_analysis_last_started_at",
+            "investment_analysis_last_finished_at",
+        ]
+    )
+    payload = values.get("investment_analysis_payload")
+    if payload:
+        try:
+            analysis = InvestmentAnalysisOut(**json.loads(payload))
+        except Exception:
+            analysis = InvestmentAnalysisOut(
+                rules=[],
+                signals=[],
+                generated_at=None,
+                horizon_days=INVESTMENT_ANALYSIS_HORIZON_DAYS,
+                lookback_years=INVESTMENT_ANALYSIS_LOOKBACK_YEARS,
+            )
+    else:
+        analysis = InvestmentAnalysisOut(
+            rules=[],
+            signals=[],
+            generated_at=None,
+            horizon_days=INVESTMENT_ANALYSIS_HORIZON_DAYS,
+            lookback_years=INVESTMENT_ANALYSIS_LOOKBACK_YEARS,
+        )
+    analysis.status = values.get("investment_analysis_status", analysis.status)
+    analysis.error = values.get("investment_analysis_error")
+    analysis.last_started_at = values.get("investment_analysis_last_started_at")
+    analysis.last_finished_at = values.get("investment_analysis_last_finished_at")
+    return analysis
+
+
+async def start_investment_analysis_recalculation() -> InvestmentAnalysisOut:
+    global investment_analysis_task
+    if investment_analysis_task and not investment_analysis_task.done():
+        return get_cached_investment_analysis()
+    started_at = datetime.now(UTC).isoformat()
+    set_app_state(
+        {
+            "investment_analysis_status": "running",
+            "investment_analysis_error": "",
+            "investment_analysis_last_started_at": started_at,
+        }
+    )
+    investment_analysis_task = asyncio.create_task(run_investment_analysis_recalculation())
+    return get_cached_investment_analysis()
+
+
+async def run_investment_analysis_recalculation() -> None:
+    started_at = datetime.now(UTC).isoformat()
+    set_app_state(
+        {
+            "investment_analysis_status": "running",
+            "investment_analysis_error": "",
+            "investment_analysis_last_started_at": started_at,
+        }
+    )
+    try:
+        analysis = await asyncio.to_thread(
+            lambda: build_investment_analysis(
+                load_all_symbols(),
+                INVESTMENT_ANALYSIS_HORIZON_DAYS,
+                INVESTMENT_ANALYSIS_LOOKBACK_YEARS,
+            )
+        )
+        finished_at = datetime.now(UTC).isoformat()
+        analysis.status = "succeeded"
+        analysis.last_started_at = started_at
+        analysis.last_finished_at = finished_at
+        set_app_state(
+            {
+                "investment_analysis_status": "succeeded",
+                "investment_analysis_error": "",
+                "investment_analysis_last_started_at": started_at,
+                "investment_analysis_last_finished_at": finished_at,
+                "investment_analysis_payload": analysis.model_dump_json(),
+            }
+        )
+    except Exception as exc:
+        set_app_state(
+            {
+                "investment_analysis_status": "failed",
+                "investment_analysis_error": str(exc),
+                "investment_analysis_last_finished_at": datetime.now(UTC).isoformat(),
+            }
+        )
+
+
+@app.get("/api/investment-support/analysis", response_model=InvestmentAnalysisOut)
+def investment_support_analysis() -> InvestmentAnalysisOut:
+    return get_cached_investment_analysis()
+
+
+@app.post("/api/investment-support/analysis/recalculate", response_model=InvestmentAnalysisOut)
+async def recalculate_investment_support_analysis() -> InvestmentAnalysisOut:
+    return await start_investment_analysis_recalculation()
 
 
 @app.post("/api/symbols", response_model=SymbolOut)

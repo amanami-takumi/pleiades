@@ -357,6 +357,223 @@
         </section>
       </section>
 
+      <section v-else-if="activeTab === 'invest-support'" class="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-5 px-4 py-5 sm:px-6 lg:px-8">
+        <header class="flex flex-col gap-4 border-b border-border pb-5 xl:flex-row xl:items-end xl:justify-between">
+          <div>
+            <p class="text-sm font-medium text-accent">Pleiades</p>
+            <h1 class="mt-1 text-2xl font-semibold tracking-normal text-neutral-50 sm:text-3xl">投資支援</h1>
+            <p class="mt-2 text-sm text-neutral-400">JST 1:00 に保存済みの価格履歴と売買ルールから現在シグナルと5年バックテストを計算します。</p>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <button class="inline-flex h-10 items-center gap-2 rounded-md border border-border bg-panel px-3 text-sm font-medium text-neutral-100 transition hover:border-accent disabled:cursor-not-allowed disabled:opacity-60" type="button" :disabled="analysisLoading" @click="retryInvestmentBacktest">
+              <RefreshCw :size="17" :class="{ 'animate-spin': analysisLoading }" />バックテスト再試行
+            </button>
+          </div>
+        </header>
+
+        <p v-if="analysisLoading" class="rounded-md border border-accent/30 bg-accent/10 px-3 py-2 text-sm text-sky-100">バックエンドで5年バックテストを計算しています。</p>
+        <p v-if="analysisError || analysis?.error" class="rounded-md border border-loss/40 bg-loss/10 px-3 py-2 text-sm text-red-200">{{ analysisError || analysis?.error }}</p>
+
+        <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <Metric label="現在シグナル" :value="`${analysis?.signals.length ?? 0}件`" />
+          <Metric label="平均正答率" :value="percent(analysisAccuracyAverage)" :tone="analysisAccuracyAverage === null ? undefined : analysisAccuracyAverage - 50" />
+          <Metric label="平均期待騰落率" :value="percent(analysisReturnAverage)" :tone="analysisReturnAverage ?? undefined" />
+          <Metric label="検証期間" :value="`${analysis?.lookback_years ?? 5}年 / ${analysis?.horizon_days ?? 20}営業日`" />
+        </div>
+        <div class="grid gap-5 xl:grid-cols-[minmax(320px,420px)_minmax(0,1fr)]">
+          <section class="rounded-md border border-border bg-panel">
+            <div class="flex flex-col gap-2 border-b border-border px-4 py-3">
+              <div class="flex items-center justify-between gap-3">
+                <h2 class="text-sm font-semibold text-neutral-200">現在シグナル</h2>
+                <span class="text-xs text-neutral-500">{{ analysis?.generated_at ?? 'N/A' }}</span>
+              </div>
+              <label class="flex items-center gap-2 text-xs text-neutral-500">
+                表示対象
+                <select v-model="analysisSignalFilter" class="h-9 min-w-48 rounded-md border border-border bg-background px-2 text-xs text-neutral-100 outline-none focus:border-accent">
+                  <option value="all">すべて</option>
+                  <optgroup label="ルール">
+                    <option v-for="rule in analysisSignalRuleOptions" :key="rule" :value="`rule:${rule}`">{{ rule }}</option>
+                  </optgroup>
+                  <optgroup label="区分">
+                    <option v-for="side in analysisSignalSideOptions" :key="side" :value="`side:${side}`">{{ side }}</option>
+                  </optgroup>
+                  <optgroup label="銘柄">
+                    <option v-for="symbol in analysisSignalSymbolOptions" :key="symbol.id" :value="`symbol:${symbol.id}`">{{ symbol.label }}</option>
+                  </optgroup>
+                </select>
+              </label>
+            </div>
+            <div class="max-h-[560px] overflow-auto">
+              <button
+                v-for="signal in analysisSignals"
+                :key="`${signal.symbol_id}-${signal.side}-${signal.rule_name}`"
+                class="grid w-full gap-2 border-b border-border/70 px-4 py-3 text-left hover:bg-panel2"
+                type="button"
+                @click="selectSignalSymbolFilter(signal.symbol_id)"
+              >
+                <div class="flex min-w-0 items-start justify-between gap-3">
+                  <div class="min-w-0">
+                    <p class="truncate text-sm font-semibold text-neutral-100">{{ signal.name }}</p>
+                    <p class="mt-0.5 truncate text-xs text-neutral-500">
+                      <button class="font-medium text-accent hover:text-sky-200" type="button" @click.stop="openSignalTicker(signal.symbol_id)">
+                        {{ signal.ticker }}
+                      </button>
+                      <span> / {{ signal.rule_name }}</span>
+                    </p>
+                  </div>
+                  <span class="shrink-0 rounded border px-2 py-0.5 text-xs" :class="signal.side === '買い' ? 'border-gain/40 bg-gain/10 text-gain' : 'border-loss/40 bg-loss/10 text-loss'">{{ signal.side }}</span>
+                </div>
+                <p class="text-xs leading-5 text-neutral-400">{{ signal.reason }}</p>
+                <div class="flex flex-wrap gap-1.5">
+                  <span v-if="signal.rsi_14 !== null" class="rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-neutral-300">
+                    RSI(14) {{ number(signal.rsi_14) }}
+                  </span>
+                  <span v-if="signal.rsi_2 !== null" class="rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-neutral-300">
+                    RSI(2) {{ number(signal.rsi_2) }}
+                  </span>
+                  <span class="rounded border border-gain/40 bg-gain/10 px-1.5 py-0.5 text-[11px] text-gain">
+                    買い {{ symbolSignalStrength(signal.symbol_id).buyPercent.toFixed(0) }}% / 強さ {{ number(symbolSignalStrength(signal.symbol_id).buyStrength) }}
+                  </span>
+                  <span class="rounded border border-loss/40 bg-loss/10 px-1.5 py-0.5 text-[11px] text-loss">
+                    売り {{ symbolSignalStrength(signal.symbol_id).sellPercent.toFixed(0) }}% / 強さ {{ number(symbolSignalStrength(signal.symbol_id).sellStrength) }}
+                  </span>
+                </div>
+                <div class="flex h-1.5 overflow-hidden rounded bg-background">
+                  <div class="h-full bg-gain" :style="{ width: `${symbolSignalStrength(signal.symbol_id).buyPercent}%` }"></div>
+                  <div class="h-full bg-loss" :style="{ width: `${symbolSignalStrength(signal.symbol_id).sellPercent}%` }"></div>
+                </div>
+                <div class="flex items-center justify-between text-xs text-neutral-500">
+                  <span>{{ signal.date }}</span>
+                  <span>{{ money(signal.close, null) }}</span>
+                </div>
+              </button>
+              <div v-if="analysisSignals.length === 0" class="px-4 py-10 text-center text-sm text-neutral-500">現在該当する銘柄はありません</div>
+            </div>
+          </section>
+
+          <section class="min-w-0 rounded-md border border-border bg-panel">
+            <div class="flex flex-col gap-2 border-b border-border px-4 py-3 md:flex-row md:items-center md:justify-between">
+              <h2 class="text-sm font-semibold text-neutral-200">ルール別バックテスト</h2>
+              <div class="flex rounded-md border border-border bg-background p-1">
+                <button
+                  v-for="side in analysisSideFilters"
+                  :key="side"
+                  type="button"
+                  class="h-8 rounded px-3 text-xs font-medium transition"
+                  :class="analysisSideFilter === side ? 'bg-panel2 text-accent' : 'text-neutral-400 hover:text-neutral-100'"
+                  @click="analysisSideFilter = side"
+                >
+                  {{ side }}
+                </button>
+              </div>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="w-full min-w-[1040px] text-left text-sm">
+                <thead class="border-b border-border text-xs text-neutral-500">
+                  <tr>
+                    <th class="w-16 px-4 py-2 font-medium">区分</th>
+                    <th class="w-56 px-4 py-2 font-medium">ルール</th>
+                    <th class="px-4 py-2 font-medium">条件</th>
+                    <th class="w-20 px-4 py-2 text-right font-medium">現在</th>
+                    <th class="w-24 px-4 py-2 text-right font-medium">強さ</th>
+                    <th class="w-24 px-4 py-2 text-right font-medium">検証数</th>
+                    <th class="w-24 px-4 py-2 text-right font-medium">正答率</th>
+                    <th class="w-28 px-4 py-2 text-right font-medium">期待騰落率</th>
+                    <th class="w-28 px-4 py-2 text-right font-medium">平均幅</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template v-for="rule in filteredAnalysisRules" :key="`${rule.side}-${rule.name}`">
+                    <tr class="border-b border-border/70 align-top hover:bg-background/70">
+                      <td class="px-4 py-3">
+                        <span class="rounded border px-2 py-0.5 text-xs" :class="rule.side === '買い' ? 'border-gain/40 bg-gain/10 text-gain' : 'border-loss/40 bg-loss/10 text-loss'">{{ rule.side }}</span>
+                      </td>
+                      <td class="px-4 py-3">
+                        <button class="flex w-full items-start justify-between gap-2 text-left" type="button" @click="toggleAnalysisRuleDetail(rule)">
+                          <span class="min-w-0">
+                            <span class="block font-semibold text-neutral-100">{{ rule.name }}</span>
+                            <span v-if="!rule.supported" class="mt-1 block text-xs text-neutral-500">ペア取引は銘柄ペア定義未実装</span>
+                          </span>
+                          <ChevronUp v-if="isAnalysisRuleExpanded(rule)" class="mt-0.5 shrink-0 text-neutral-500" :size="14" />
+                          <ChevronDown v-else class="mt-0.5 shrink-0 text-neutral-500" :size="14" />
+                        </button>
+                      </td>
+                      <td class="px-4 py-3">
+                        <p class="text-xs leading-5 text-neutral-300">{{ rule.condition }}</p>
+                        <p class="mt-1 text-xs leading-5 text-neutral-500">{{ rule.description }}</p>
+                      </td>
+                      <td class="px-4 py-3 text-right">
+                        <button class="rounded px-1.5 py-0.5 text-neutral-100 hover:bg-panel2 hover:text-accent" type="button" @click="selectSignalRuleFilter(rule.name)">
+                          {{ rule.current_signal_count }}
+                        </button>
+                      </td>
+                      <td class="px-4 py-3 text-right text-neutral-300">{{ number(ruleSignalStrength(rule)) }}</td>
+                      <td class="px-4 py-3 text-right text-neutral-300">{{ rule.backtest.signals }}</td>
+                      <td class="px-4 py-3 text-right" :class="percentClass(rule.backtest.accuracy_percent === null ? null : rule.backtest.accuracy_percent - 50)">{{ percent(rule.backtest.accuracy_percent) }}</td>
+                      <td class="px-4 py-3 text-right" :class="percentClass(rule.backtest.average_return_percent)">{{ percent(rule.backtest.average_return_percent) }}</td>
+                      <td class="px-4 py-3 text-right text-neutral-300">{{ percent(rule.backtest.average_abs_return_percent) }}</td>
+                    </tr>
+                    <tr v-if="isAnalysisRuleExpanded(rule)" class="border-b border-border/70 bg-background/50">
+                      <td colspan="9" class="px-4 py-4">
+                        <div class="mb-3 text-xs font-semibold text-neutral-300">曜日分析</div>
+                        <div class="overflow-x-auto rounded-md border border-border">
+                          <table class="w-full min-w-[1280px] text-left text-xs">
+                            <thead class="border-b border-border text-neutral-500">
+                              <tr>
+                                <th class="w-16 px-3 py-2 font-medium">曜日</th>
+                                <th class="w-24 px-3 py-2 text-right font-medium">全体件数</th>
+                                <th class="w-28 px-3 py-2 text-right font-medium">全体日次</th>
+                                <th class="w-24 px-3 py-2 text-right font-medium">シグナル数</th>
+                                <th class="w-32 px-3 py-2 text-right font-medium">発生日</th>
+                                <th class="w-28 px-3 py-2 text-right font-medium">1日後</th>
+                                <th class="w-28 px-3 py-2 text-right font-medium">3日後</th>
+                                <th class="w-28 px-3 py-2 text-right font-medium">5日後</th>
+                                <th class="w-36 px-3 py-2 text-right font-medium">交互作用</th>
+                                <th class="w-28 px-3 py-2 text-right font-medium">SQ週全体</th>
+                                <th class="w-28 px-3 py-2 text-right font-medium">SQ週数</th>
+                                <th class="w-28 px-3 py-2 text-right font-medium">SQ週1日後</th>
+                                <th class="w-28 px-3 py-2 text-right font-medium">SQ週3日後</th>
+                                <th class="w-28 px-3 py-2 text-right font-medium">SQ週5日後</th>
+                                <th class="w-36 px-3 py-2 text-right font-medium">SQ週交互作用</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <tr v-for="stat in rule.weekday_stats" :key="stat.weekday" class="border-b border-border/70">
+                                <td class="px-3 py-2 font-semibold text-neutral-100">{{ stat.label }}</td>
+                                <td class="px-3 py-2 text-right text-neutral-300">{{ stat.market_sample_count }}</td>
+                                <td class="px-3 py-2 text-right" :class="percentClass(stat.market_average_daily_return_percent)">{{ percent(stat.market_average_daily_return_percent) }}</td>
+                                <td class="px-3 py-2 text-right text-neutral-300">{{ stat.signal_count }}</td>
+                                <td class="px-3 py-2 text-right" :class="percentClass(stat.signal_day_average_return_percent)">{{ percent(stat.signal_day_average_return_percent) }}</td>
+                                <td class="px-3 py-2 text-right" :class="percentClass(stat.average_return_1d_percent)">{{ percent(stat.average_return_1d_percent) }}</td>
+                                <td class="px-3 py-2 text-right" :class="percentClass(stat.average_return_3d_percent)">{{ percent(stat.average_return_3d_percent) }}</td>
+                                <td class="px-3 py-2 text-right" :class="percentClass(stat.average_return_5d_percent)">{{ percent(stat.average_return_5d_percent) }}</td>
+                                <td class="px-3 py-2 text-right" :class="percentClass(stat.interaction_effect_1d_percent)">{{ percent(stat.interaction_effect_1d_percent) }}</td>
+                                <td class="px-3 py-2 text-right" :class="percentClass(stat.major_sq_week_market_average_daily_return_percent)">{{ percent(stat.major_sq_week_market_average_daily_return_percent) }}</td>
+                                <td class="px-3 py-2 text-right text-neutral-300">{{ stat.major_sq_week_signal_count }}</td>
+                                <td class="px-3 py-2 text-right" :class="percentClass(stat.major_sq_week_average_return_1d_percent)">{{ percent(stat.major_sq_week_average_return_1d_percent) }}</td>
+                                <td class="px-3 py-2 text-right" :class="percentClass(stat.major_sq_week_average_return_3d_percent)">{{ percent(stat.major_sq_week_average_return_3d_percent) }}</td>
+                                <td class="px-3 py-2 text-right" :class="percentClass(stat.major_sq_week_average_return_5d_percent)">{{ percent(stat.major_sq_week_average_return_5d_percent) }}</td>
+                                <td class="px-3 py-2 text-right" :class="percentClass(stat.major_sq_week_interaction_effect_1d_percent)">{{ percent(stat.major_sq_week_interaction_effect_1d_percent) }}</td>
+                              </tr>
+                              <tr v-if="rule.weekday_stats.length === 0">
+                                <td colspan="15" class="px-3 py-5 text-center text-neutral-500">曜日分析データはありません</td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+                      </td>
+                    </tr>
+                  </template>
+                  <tr v-if="filteredAnalysisRules.length === 0">
+                    <td colspan="9" class="px-4 py-8 text-center text-sm text-neutral-500">ルールはありません</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </section>
+
       <section v-else-if="activeTab === 'tasks'" class="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-5 px-4 py-5 sm:px-6 lg:px-8">
         <header class="flex flex-col gap-4 border-b border-border pb-5 xl:flex-row xl:items-end xl:justify-between">
           <div>
@@ -606,6 +823,7 @@ import { computed, defineComponent, h, onMounted, onUnmounted, ref, watch } from
 import {
   AlertTriangle,
   ArrowUpDown,
+  BarChart3,
   BriefcaseBusiness,
   ChartCandlestick,
   ChartLine,
@@ -635,11 +853,13 @@ import {
   deleteTask,
   deleteTaskTag,
   getHistory,
+  getInvestmentAnalysis,
   listRefreshJobs,
   listPurchases,
   listSymbols,
   listTaskTags,
   listTasks,
+  recalculateInvestmentAnalysis,
   reorderSymbols,
   refreshAll,
   refreshSymbol,
@@ -648,6 +868,9 @@ import {
   updateSymbol,
   type PricePoint,
   type Purchase,
+  type AnalysisRule,
+  type AnalysisSignal,
+  type InvestmentAnalysis,
   type RefreshJob,
   type SymbolRow,
   type Task,
@@ -681,6 +904,7 @@ const Metric = defineComponent({
 
 const tabs = [
   { key: 'invest', label: '投資情報', icon: BriefcaseBusiness },
+  { key: 'invest-support', label: '投資支援', icon: BarChart3 },
   { key: 'tasks', label: 'タスク管理', icon: Layers },
   { key: 'home', label: 'スマートホーム', icon: Home }
 ]
@@ -725,6 +949,7 @@ const taskTableColumns = [
 type ChartDrawingMode = (typeof chartDrawingModes)[number]['value']
 type TaskSort = (typeof taskSortOptions)[number]['value']
 type SortDirection = 'asc' | 'desc'
+type AnalysisSideFilter = 'すべて' | '買い' | '売り'
 type ChartGuideLine = {
   id: string
   type: 'support' | 'resistance'
@@ -762,6 +987,12 @@ const draggingSymbolId = ref<number | null>(null)
 const tasks = ref<Task[]>([])
 const taskTags = ref<TaskTag[]>([])
 const taskError = ref('')
+const analysis = ref<InvestmentAnalysis | null>(null)
+const analysisError = ref('')
+const analysisLoading = ref(false)
+const analysisSideFilter = ref<AnalysisSideFilter>('すべて')
+const analysisSignalFilter = ref('all')
+const expandedAnalysisRuleKeys = ref<string[]>([])
 const taskSort = ref<TaskSort>('due')
 const taskSortDirection = ref<SortDirection>('asc')
 const editingTaskId = ref<number | null>(null)
@@ -774,6 +1005,7 @@ const selectedTaskTagIds = ref<number[]>([])
 const newTaskTagName = ref('')
 const newTaskTagColor = ref('#7dd3fc')
 let jobsTimer: number | undefined
+let analysisTimer: number | undefined
 
 const selectedSymbol = computed(() => symbols.value.find((symbol) => symbol.id === selectedId.value) ?? null)
 const selectedChartGuideLines = computed(() => (selectedId.value ? chartGuideLinesBySymbol.value[selectedId.value] ?? [] : []))
@@ -797,6 +1029,63 @@ const completedTasks = computed(() =>
     .filter((task) => task.status === 'done')
     .sort((a, b) => (b.completed_at ?? '').localeCompare(a.completed_at ?? '') || b.id - a.id)
 )
+const analysisSideFilters: AnalysisSideFilter[] = ['すべて', '買い', '売り']
+const analysisSignalRuleOptions = computed(() =>
+  Array.from(new Set((analysis.value?.signals ?? []).map((signal) => signal.rule_name))).sort((a, b) =>
+    a.localeCompare(b, 'ja')
+  )
+)
+const analysisSignalSideOptions = computed(() =>
+  Array.from(new Set((analysis.value?.signals ?? []).map((signal) => signal.side))).sort((a, b) => a.localeCompare(b, 'ja'))
+)
+const analysisSignalSymbolOptions = computed(() => {
+  const symbolsById = new Map<number, { id: number; label: string; sortKey: string }>()
+  for (const signal of analysis.value?.signals ?? []) {
+    symbolsById.set(signal.symbol_id, {
+      id: signal.symbol_id,
+      label: `${signal.ticker} / ${signal.name}`,
+      sortKey: `${signal.ticker} ${signal.name}`
+    })
+  }
+  return [...symbolsById.values()].sort((a, b) => a.sortKey.localeCompare(b.sortKey, 'ja'))
+})
+const analysisSignals = computed<AnalysisSignal[]>(() =>
+  filteredAnalysisSignals().sort(
+    (a, b) => a.rule_name.localeCompare(b.rule_name, 'ja') || a.side.localeCompare(b.side, 'ja') || a.ticker.localeCompare(b.ticker)
+  )
+)
+const filteredAnalysisRules = computed<AnalysisRule[]>(() => {
+  const rules = analysis.value?.rules ?? []
+  if (analysisSideFilter.value === 'すべて') return rules
+  return rules.filter((rule) => rule.side === analysisSideFilter.value)
+})
+const standardizedRuleStrengthByName = computed(() => {
+  const rules = analysis.value?.rules ?? []
+  const result = new Map<string, number>()
+  for (const side of ['買い', '売り']) {
+    const sideRules = rules.filter((rule) => rule.side === side)
+    const rawValues = sideRules.map((rule) => ruleRawSignalStrength(rule))
+    const minValue = Math.min(...rawValues)
+    const maxValue = Math.max(...rawValues)
+    for (const rule of sideRules) {
+      const raw = ruleRawSignalStrength(rule)
+      result.set(rule.name, maxValue > minValue ? ((raw - minValue) / (maxValue - minValue)) * 100 : 50)
+    }
+  }
+  return result
+})
+const analysisAccuracyAverage = computed(() => {
+  const values = filteredAnalysisRules.value
+    .map((rule) => rule.backtest.accuracy_percent)
+    .filter((value): value is number => value !== null)
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null
+})
+const analysisReturnAverage = computed(() => {
+  const values = filteredAnalysisRules.value
+    .map((rule) => rule.backtest.average_return_percent)
+    .filter((value): value is number => value !== null)
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null
+})
 const totalReturn = computed(() => history.value[history.value.length - 1]?.return_percent ?? null)
 const isStockPurchaseInput = computed(() => selectedSymbol.value?.asset_type === 'stock')
 const purchaseAmountPlaceholder = computed(() => (isStockPurchaseInput.value ? '一株価格' : '購入額'))
@@ -816,6 +1105,18 @@ watch(selectedSymbol, (symbol) => {
   tagDraft.value = symbol?.tag ?? ''
 })
 
+watch(activeTab, (tab) => {
+  if (tab === 'invest-support' && analysis.value === null && !analysisLoading.value) {
+    void loadInvestmentAnalysis()
+  }
+})
+
+watch([analysisSignalRuleOptions, analysisSignalSideOptions, analysisSignalSymbolOptions], () => {
+  if (!isValidAnalysisSignalFilter(analysisSignalFilter.value)) {
+    analysisSignalFilter.value = 'all'
+  }
+})
+
 onMounted(async () => {
   await load()
   await loadTaskData()
@@ -825,6 +1126,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   if (jobsTimer) window.clearInterval(jobsTimer)
+  if (analysisTimer) window.clearInterval(analysisTimer)
 })
 
 async function load() {
@@ -868,6 +1170,126 @@ async function loadTaskData() {
   } catch (err) {
     taskError.value = err instanceof Error ? err.message : 'タスクの読み込みに失敗しました'
   }
+}
+
+async function loadInvestmentAnalysis() {
+  try {
+    analysisError.value = ''
+    analysis.value = await getInvestmentAnalysis()
+    analysisLoading.value = analysis.value.status === 'running'
+    updateAnalysisPolling()
+  } catch (err) {
+    analysisError.value = err instanceof Error ? err.message : '投資支援データの読み込みに失敗しました'
+  }
+}
+
+async function retryInvestmentBacktest() {
+  try {
+    analysisError.value = ''
+    analysisLoading.value = true
+    analysis.value = await recalculateInvestmentAnalysis()
+    updateAnalysisPolling()
+  } catch (err) {
+    analysisLoading.value = false
+    analysisError.value = err instanceof Error ? err.message : 'バックテスト再試行に失敗しました'
+  }
+}
+
+function updateAnalysisPolling() {
+  if (analysisTimer) {
+    window.clearInterval(analysisTimer)
+    analysisTimer = undefined
+  }
+  if (analysis.value?.status === 'running') {
+    analysisTimer = window.setInterval(loadInvestmentAnalysis, 5000)
+  }
+}
+
+function analysisRuleKey(rule: AnalysisRule) {
+  return `${rule.side}:${rule.name}`
+}
+
+function isAnalysisRuleExpanded(rule: AnalysisRule) {
+  return expandedAnalysisRuleKeys.value.includes(analysisRuleKey(rule))
+}
+
+function toggleAnalysisRuleDetail(rule: AnalysisRule) {
+  const key = analysisRuleKey(rule)
+  expandedAnalysisRuleKeys.value = isAnalysisRuleExpanded(rule)
+    ? expandedAnalysisRuleKeys.value.filter((value) => value !== key)
+    : [...expandedAnalysisRuleKeys.value, key]
+}
+
+function selectSignalRuleFilter(ruleName: string) {
+  analysisSignalFilter.value = `rule:${ruleName}`
+}
+
+function selectSignalSymbolFilter(symbolId: number) {
+  analysisSignalFilter.value = `symbol:${symbolId}`
+}
+
+function ruleSignalStrength(rule: AnalysisRule) {
+  return standardizedRuleStrengthByName.value.get(rule.name) ?? 0
+}
+
+function ruleRawSignalStrength(rule: AnalysisRule) {
+  if (isWidthExtractionRule(rule)) {
+    return Math.max(0, rule.backtest.average_abs_return_percent ?? 0)
+  }
+  return Math.max(0, rule.backtest.average_return_percent ?? 0)
+}
+
+function isWidthExtractionRule(rule: AnalysisRule) {
+  const text = `${rule.name} ${rule.condition} ${rule.description}`
+  return /幅|ボラ|ATR|騰落率|値幅|急伸|大きく伸び|リターン重視|高騰落率/.test(text)
+}
+
+function signalRuleStrength(signal: AnalysisSignal) {
+  return standardizedRuleStrengthByName.value.get(signal.rule_name) ?? 0
+}
+
+function symbolSignalStrength(symbolId: number) {
+  const signals = (analysis.value?.signals ?? []).filter((signal) => signal.symbol_id === symbolId)
+  const buyStrength = signals
+    .filter((signal) => signal.side === '買い')
+    .reduce((sum, signal) => sum + signalRuleStrength(signal), 0)
+  const sellStrength = signals
+    .filter((signal) => signal.side === '売り')
+    .reduce((sum, signal) => sum + signalRuleStrength(signal), 0)
+  const total = buyStrength + sellStrength
+  return {
+    buyStrength,
+    sellStrength,
+    buyPercent: total > 0 ? (buyStrength / total) * 100 : 0,
+    sellPercent: total > 0 ? (sellStrength / total) * 100 : 0
+  }
+}
+
+function filteredAnalysisSignals() {
+  const signals = [...(analysis.value?.signals ?? [])]
+  const [kind, ...rest] = analysisSignalFilter.value.split(':')
+  const value = rest.join(':')
+  if (kind === 'rule') return signals.filter((signal) => signal.rule_name === value)
+  if (kind === 'side') return signals.filter((signal) => signal.side === value)
+  if (kind === 'symbol') return signals.filter((signal) => signal.symbol_id === Number(value))
+  return signals
+}
+
+function isValidAnalysisSignalFilter(value: string) {
+  const [kind, ...rest] = value.split(':')
+  const target = rest.join(':')
+  if (value === 'all') return true
+  if (kind === 'rule') return analysisSignalRuleOptions.value.includes(target)
+  if (kind === 'side') return analysisSignalSideOptions.value.includes(target)
+  if (kind === 'symbol') return analysisSignalSymbolOptions.value.some((symbol) => symbol.id === Number(target))
+  return false
+}
+
+async function openSignalTicker(symbolId: number) {
+  activeTab.value = 'invest'
+  selectedId.value = symbolId
+  await loadHistory()
+  await loadPurchases()
 }
 
 async function selectSymbol(id: number) {
