@@ -108,6 +108,7 @@
             </div>
           </section>
 
+          <div class="grid min-w-0 gap-5">
           <section class="min-w-0 rounded-md border border-border bg-panel">
             <div v-if="selectedSymbol" class="flex h-full flex-col">
               <div class="flex flex-col gap-3 px-4 py-4 md:flex-row md:items-start md:justify-between">
@@ -294,6 +295,7 @@
             <div v-else class="flex h-80 items-center justify-center text-sm text-neutral-500">読み込み中です</div>
           </section>
         </div>
+        </div>
 
         <section class="rounded-md border border-border bg-panel">
           <div class="flex flex-col gap-2 border-b border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
@@ -362,16 +364,36 @@
           <div>
             <p class="text-sm font-medium text-accent">Pleiades</p>
             <h1 class="mt-1 text-2xl font-semibold tracking-normal text-neutral-50 sm:text-3xl">投資支援</h1>
-            <p class="mt-2 text-sm text-neutral-400">JST 1:00 に保存済みの価格履歴と売買ルールから現在シグナルと5年バックテストを計算します。</p>
+            <p class="mt-2 text-sm text-neutral-400">JST 1:00 に保存済みの価格履歴とカテゴリ化済み売買ルールから現在シグナルとバックテストを計算します。</p>
           </div>
           <div class="flex flex-wrap items-center gap-2">
+            <label class="grid gap-1 text-xs text-neutral-500">
+              検証年数
+              <input
+                v-model.number="analysisLookbackYears"
+                class="h-10 w-24 rounded-md border border-border bg-panel px-3 text-sm text-neutral-100 outline-none focus:border-accent"
+                type="number"
+                min="1"
+                max="20"
+              />
+            </label>
+            <label class="grid gap-1 text-xs text-neutral-500">
+              判定営業日
+              <input
+                v-model.number="analysisHorizonDays"
+                class="h-10 w-24 rounded-md border border-border bg-panel px-3 text-sm text-neutral-100 outline-none focus:border-accent"
+                type="number"
+                min="1"
+                max="260"
+              />
+            </label>
             <button class="inline-flex h-10 items-center gap-2 rounded-md border border-border bg-panel px-3 text-sm font-medium text-neutral-100 transition hover:border-accent disabled:cursor-not-allowed disabled:opacity-60" type="button" :disabled="analysisLoading" @click="retryInvestmentBacktest">
               <RefreshCw :size="17" :class="{ 'animate-spin': analysisLoading }" />バックテスト再試行
             </button>
           </div>
         </header>
 
-        <p v-if="analysisLoading" class="rounded-md border border-accent/30 bg-accent/10 px-3 py-2 text-sm text-sky-100">バックエンドで5年バックテストを計算しています。</p>
+        <p v-if="analysisLoading" class="rounded-md border border-accent/30 bg-accent/10 px-3 py-2 text-sm text-sky-100">バックエンドでバックテストを計算しています。</p>
         <p v-if="analysisError || analysis?.error" class="rounded-md border border-loss/40 bg-loss/10 px-3 py-2 text-sm text-red-200">{{ analysisError || analysis?.error }}</p>
 
         <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -381,7 +403,7 @@
           <Metric label="検証期間" :value="`${analysis?.lookback_years ?? 5}年 / ${analysis?.horizon_days ?? 20}営業日`" />
         </div>
         <div class="grid gap-5 xl:grid-cols-[minmax(320px,420px)_minmax(0,1fr)]">
-          <section class="rounded-md border border-border bg-panel">
+          <section id="current-signals-section" class="rounded-md border border-border bg-panel">
             <div class="flex flex-col gap-2 border-b border-border px-4 py-3">
               <div class="flex items-center justify-between gap-3">
                 <h2 class="text-sm font-semibold text-neutral-200">現在シグナル</h2>
@@ -419,6 +441,7 @@
                         {{ signal.ticker }}
                       </button>
                       <span> / {{ signal.rule_name }}</span>
+                      <span v-if="signal.primary_category"> / {{ signal.primary_category }}</span>
                     </p>
                   </div>
                   <span class="shrink-0 rounded border px-2 py-0.5 text-xs" :class="signal.side === '買い' ? 'border-gain/40 bg-gain/10 text-gain' : 'border-loss/40 bg-loss/10 text-loss'">{{ signal.side }}</span>
@@ -451,9 +474,164 @@
             </div>
           </section>
 
+          <div class="grid min-w-0 gap-5">
+            <section class="min-w-0 rounded-md border border-border bg-panel">
+              <div class="flex flex-col gap-2 border-b border-border px-4 py-3 md:flex-row md:items-center md:justify-between">
+                <button class="inline-flex items-center gap-2 text-left" type="button" @click="categoryBacktestOpen = !categoryBacktestOpen">
+                  <h2 class="text-sm font-semibold text-neutral-200">カテゴリ別バックテスト</h2>
+                  <ChevronUp v-if="categoryBacktestOpen" class="text-neutral-500" :size="15" />
+                  <ChevronDown v-else class="text-neutral-500" :size="15" />
+                </button>
+                <div class="flex rounded-md border border-border bg-background p-1">
+                  <button
+                    v-for="side in analysisSideFilters"
+                    :key="side"
+                    type="button"
+                    class="h-8 rounded px-3 text-xs font-medium transition"
+                    :class="analysisSideFilter === side ? 'bg-panel2 text-accent' : 'text-neutral-400 hover:text-neutral-100'"
+                    @click="analysisSideFilter = side"
+                  >
+                    {{ side }}
+                  </button>
+                </div>
+              </div>
+              <div v-if="categoryBacktestOpen" class="overflow-x-auto">
+                <table class="w-full min-w-[1200px] text-left text-sm">
+                  <thead class="border-b border-border text-xs text-neutral-500">
+                    <tr>
+                      <th v-for="column in analysisCategoryColumns" :key="column.value" class="px-4 py-2 font-medium" :class="column.class">
+                        <button class="inline-flex items-center gap-1 rounded px-1 py-1 hover:bg-panel2 hover:text-neutral-200" :class="column.align === 'right' ? 'ml-auto' : ''" type="button" @click="setAnalysisCategorySort(column.value)">
+                          {{ column.label }}
+                          <ArrowUpDown :size="12" :class="analysisCategorySort === column.value ? 'text-accent' : 'text-neutral-600'" />
+                          <span v-if="analysisCategorySort === column.value" class="text-accent">{{ analysisCategorySortMark }}</span>
+                        </button>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <template v-for="category in filteredAnalysisCategories" :key="`${category.side}-${category.name}`">
+                      <tr class="border-b border-border/70 align-top hover:bg-background/70">
+                        <td class="px-4 py-3">
+                          <span class="rounded border px-2 py-0.5 text-xs" :class="category.side === '買い' ? 'border-gain/40 bg-gain/10 text-gain' : 'border-loss/40 bg-loss/10 text-loss'">{{ category.side }}</span>
+                        </td>
+                        <td class="px-4 py-3">
+                          <button class="flex w-full items-start justify-between gap-2 text-left" type="button" @click="toggleAnalysisCategoryDetail(category)">
+                            <span class="block font-semibold text-neutral-100">{{ category.category_a ?? category.name }}</span>
+                            <ChevronUp v-if="isAnalysisCategoryExpanded(category)" class="mt-0.5 shrink-0 text-neutral-500" :size="14" />
+                            <ChevronDown v-else class="mt-0.5 shrink-0 text-neutral-500" :size="14" />
+                          </button>
+                        </td>
+                        <td class="px-4 py-3 font-semibold text-neutral-100">{{ category.category_b ?? '-' }}</td>
+                        <td class="px-4 py-3">
+                          <p class="text-xs leading-5 text-neutral-300">{{ category.relation ?? '-' }}</p>
+                        </td>
+                        <td class="px-4 py-3 text-right text-neutral-300">{{ category.rule_count }}</td>
+                        <td class="px-4 py-3 text-right">
+                          <button
+                            class="rounded px-1.5 py-0.5 text-neutral-100 hover:bg-panel2 hover:text-accent disabled:cursor-default disabled:text-neutral-500 disabled:hover:bg-transparent"
+                            type="button"
+                            :disabled="category.current_signal_count === 0"
+                            @click="toggleAnalysisCategorySignals(category)"
+                          >
+                            {{ category.current_signal_count }}
+                          </button>
+                        </td>
+                        <td class="px-4 py-3 text-right text-neutral-300">{{ number(categorySignalStrength(category)) }}</td>
+                        <td class="px-4 py-3 text-right text-neutral-300">{{ category.backtest.signals }}</td>
+                        <td class="px-4 py-3 text-right" :class="percentClass(category.backtest.accuracy_percent === null ? null : category.backtest.accuracy_percent - 50)">{{ percent(category.backtest.accuracy_percent) }}</td>
+                        <td class="px-4 py-3 text-right" :class="percentClass(category.backtest.average_return_percent)">{{ percent(category.backtest.average_return_percent) }}</td>
+                        <td class="px-4 py-3 text-right" :class="percentClass(category.interaction_effect_return_percent)">{{ percent(category.interaction_effect_return_percent) }}</td>
+                      </tr>
+                      <tr v-if="isAnalysisCategorySignalsExpanded(category)" class="border-b border-border/70 bg-background/60">
+                        <td colspan="11" class="px-4 py-3">
+                          <div class="mb-2 text-xs font-semibold text-neutral-300">該当銘柄</div>
+                          <div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                            <button
+                              v-for="symbol in analysisCategoryCurrentSymbols(category)"
+                              :key="symbol.symbol_id"
+                              class="grid gap-1 rounded-md border border-border bg-panel px-3 py-2 text-left hover:border-accent hover:bg-panel2"
+                              type="button"
+                              @click="openCategoryCurrentSymbol(symbol.symbol_id)"
+                            >
+                              <span class="truncate text-sm font-semibold text-neutral-100">{{ symbol.name }}</span>
+                              <span class="flex items-center justify-between gap-2 text-xs text-neutral-500">
+                                <span class="truncate text-accent">{{ symbol.ticker }}</span>
+                                <span>{{ money(symbol.close, null) }}</span>
+                              </span>
+                              <span class="text-xs text-neutral-500">{{ symbol.signal_count }}件の現在シグナル</span>
+                            </button>
+                          </div>
+                          <div v-if="analysisCategoryCurrentSymbols(category).length === 0" class="py-4 text-center text-sm text-neutral-500">該当銘柄はありません</div>
+                        </td>
+                      </tr>
+                      <tr v-if="isAnalysisCategoryExpanded(category)" class="border-b border-border/70 bg-background/50">
+                        <td colspan="11" class="px-4 py-4">
+                          <div class="mb-4 grid gap-3 text-xs text-neutral-400 sm:grid-cols-3">
+                            <div>
+                              <p class="text-neutral-500">カテゴリA単独 期待騰落率</p>
+                              <p class="mt-1 text-sm font-semibold text-neutral-100">{{ percent(category.baseline_backtest?.average_return_percent ?? null) }}</p>
+                            </div>
+                            <div>
+                              <p class="text-neutral-500">カテゴリA単独 検証数</p>
+                              <p class="mt-1 text-sm font-semibold text-neutral-100">{{ category.baseline_backtest?.signals ?? 0 }}</p>
+                            </div>
+                            <div>
+                              <p class="text-neutral-500">マトリクス重み</p>
+                              <p class="mt-1 text-sm font-semibold text-neutral-100">{{ category.matrix_weight === null ? '-' : number(category.matrix_weight) }}</p>
+                            </div>
+                          </div>
+                          <div class="mb-3 text-xs font-semibold text-neutral-300">曜日分析</div>
+                          <div class="overflow-x-auto rounded-md border border-border">
+                            <table class="w-full min-w-[900px] text-left text-xs">
+                              <thead class="border-b border-border text-neutral-500">
+                                <tr>
+                                  <th class="w-16 px-3 py-2 font-medium">曜日</th>
+                                  <th class="w-24 px-3 py-2 text-right font-medium">シグナル数</th>
+                                  <th class="w-28 px-3 py-2 text-right font-medium">発生日</th>
+                                  <th class="w-28 px-3 py-2 text-right font-medium">1日後</th>
+                                  <th class="w-28 px-3 py-2 text-right font-medium">3日後</th>
+                                  <th class="w-28 px-3 py-2 text-right font-medium">5日後</th>
+                                  <th class="w-36 px-3 py-2 text-right font-medium">交互作用</th>
+                                  <th class="w-28 px-3 py-2 text-right font-medium">SQ週数</th>
+                                  <th class="w-36 px-3 py-2 text-right font-medium">SQ週交互作用</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                <tr v-for="stat in category.weekday_stats" :key="stat.weekday" class="border-b border-border/70">
+                                  <td class="px-3 py-2 font-semibold text-neutral-100">{{ stat.label }}</td>
+                                  <td class="px-3 py-2 text-right text-neutral-300">{{ stat.signal_count }}</td>
+                                  <td class="px-3 py-2 text-right" :class="percentClass(stat.signal_day_average_return_percent)">{{ percent(stat.signal_day_average_return_percent) }}</td>
+                                  <td class="px-3 py-2 text-right" :class="percentClass(stat.average_return_1d_percent)">{{ percent(stat.average_return_1d_percent) }}</td>
+                                  <td class="px-3 py-2 text-right" :class="percentClass(stat.average_return_3d_percent)">{{ percent(stat.average_return_3d_percent) }}</td>
+                                  <td class="px-3 py-2 text-right" :class="percentClass(stat.average_return_5d_percent)">{{ percent(stat.average_return_5d_percent) }}</td>
+                                  <td class="px-3 py-2 text-right" :class="percentClass(stat.interaction_effect_1d_percent)">{{ percent(stat.interaction_effect_1d_percent) }}</td>
+                                  <td class="px-3 py-2 text-right text-neutral-300">{{ stat.major_sq_week_signal_count }}</td>
+                                  <td class="px-3 py-2 text-right" :class="percentClass(stat.major_sq_week_interaction_effect_1d_percent)">{{ percent(stat.major_sq_week_interaction_effect_1d_percent) }}</td>
+                                </tr>
+                                <tr v-if="category.weekday_stats.length === 0">
+                                  <td colspan="9" class="px-3 py-5 text-center text-neutral-500">曜日分析データはありません</td>
+                                </tr>
+                              </tbody>
+                            </table>
+                          </div>
+                        </td>
+                      </tr>
+                    </template>
+                    <tr v-if="filteredAnalysisCategories.length === 0">
+                      <td colspan="11" class="px-4 py-8 text-center text-sm text-neutral-500">カテゴリはありません</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
           <section class="min-w-0 rounded-md border border-border bg-panel">
             <div class="flex flex-col gap-2 border-b border-border px-4 py-3 md:flex-row md:items-center md:justify-between">
-              <h2 class="text-sm font-semibold text-neutral-200">ルール別バックテスト</h2>
+              <button class="inline-flex items-center gap-2 text-left" type="button" @click="ruleBacktestOpen = !ruleBacktestOpen">
+                <h2 class="text-sm font-semibold text-neutral-200">ルール別バックテスト</h2>
+                <ChevronUp v-if="ruleBacktestOpen" class="text-neutral-500" :size="15" />
+                <ChevronDown v-else class="text-neutral-500" :size="15" />
+              </button>
               <div class="flex rounded-md border border-border bg-background p-1">
                 <button
                   v-for="side in analysisSideFilters"
@@ -467,19 +645,17 @@
                 </button>
               </div>
             </div>
-            <div class="overflow-x-auto">
+            <div v-if="ruleBacktestOpen" class="overflow-x-auto">
               <table class="w-full min-w-[1040px] text-left text-sm">
                 <thead class="border-b border-border text-xs text-neutral-500">
                   <tr>
-                    <th class="w-16 px-4 py-2 font-medium">区分</th>
-                    <th class="w-56 px-4 py-2 font-medium">ルール</th>
-                    <th class="px-4 py-2 font-medium">条件</th>
-                    <th class="w-20 px-4 py-2 text-right font-medium">現在</th>
-                    <th class="w-24 px-4 py-2 text-right font-medium">強さ</th>
-                    <th class="w-24 px-4 py-2 text-right font-medium">検証数</th>
-                    <th class="w-24 px-4 py-2 text-right font-medium">正答率</th>
-                    <th class="w-28 px-4 py-2 text-right font-medium">期待騰落率</th>
-                    <th class="w-28 px-4 py-2 text-right font-medium">平均幅</th>
+                    <th v-for="column in analysisRuleColumns" :key="column.value" class="px-4 py-2 font-medium" :class="column.class">
+                      <button class="inline-flex items-center gap-1 rounded px-1 py-1 hover:bg-panel2 hover:text-neutral-200" :class="column.align === 'right' ? 'ml-auto' : ''" type="button" @click="setAnalysisRuleSort(column.value)">
+                        {{ column.label }}
+                        <ArrowUpDown :size="12" :class="analysisRuleSort === column.value ? 'text-accent' : 'text-neutral-600'" />
+                        <span v-if="analysisRuleSort === column.value" class="text-accent">{{ analysisRuleSortMark }}</span>
+                      </button>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -566,6 +742,184 @@
                   </template>
                   <tr v-if="filteredAnalysisRules.length === 0">
                     <td colspan="9" class="px-4 py-8 text-center text-sm text-neutral-500">ルールはありません</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+        </div>
+      </section>
+
+      <section v-else-if="activeTab === 'household'" class="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-5 px-4 py-5 sm:px-6 lg:px-8">
+        <header class="flex flex-col gap-4 border-b border-border pb-5 xl:flex-row xl:items-end xl:justify-between">
+          <div>
+            <p class="text-sm font-medium text-accent">Pleiades</p>
+            <h1 class="mt-1 text-2xl font-semibold tracking-normal text-neutral-50 sm:text-3xl">家計簿</h1>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <select v-model="householdMonth" class="h-10 rounded-md border border-border bg-panel px-3 text-sm outline-none focus:border-accent" @change="setHouseholdMonth(householdMonth)">
+              <option value="">全期間</option>
+              <option v-for="month in householdMonthOptions" :key="month" :value="month">{{ month }}</option>
+            </select>
+            <button class="inline-flex h-10 items-center gap-2 rounded-md border border-border bg-panel px-3 text-sm font-medium text-neutral-100 transition hover:border-accent" type="button" :disabled="householdLoading" @click="loadHousehold">
+              <RefreshCw :size="17" :class="{ 'animate-spin': householdLoading }" />再読込
+            </button>
+            <input ref="householdFileInput" class="hidden" type="file" accept=".csv,text/csv" multiple @change="uploadHouseholdCsv" />
+            <button class="inline-flex h-10 items-center gap-2 rounded-md border border-border bg-panel px-3 text-sm font-medium text-neutral-100 transition hover:border-accent disabled:cursor-not-allowed disabled:opacity-60" type="button" :disabled="householdImporting" @click="householdFileInput?.click()">
+              <Upload :size="17" />CSV取込
+            </button>
+            <button class="inline-flex h-10 items-center gap-2 rounded-md bg-accent px-3 text-sm font-semibold text-neutral-950 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-60" type="button" :disabled="householdImporting" @click="importHouseholdSampleData">
+              <Plus :size="17" />サンプル取込
+            </button>
+          </div>
+        </header>
+
+        <p v-if="householdError" class="rounded-md border px-3 py-2 text-sm" :class="householdError.includes('取り込み') || householdError.includes('スキップ') ? 'border-accent/30 bg-accent/10 text-sky-100' : 'border-loss/40 bg-loss/10 text-red-200'">{{ householdError }}</p>
+
+        <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <Metric label="対象期間" :value="householdSelectedMonthLabel" />
+          <Metric label="収入" :value="moneyValue(household?.total_income ?? 0, 'JPY')" :tone="household?.total_income ?? 0" />
+          <Metric label="支出" :value="moneyValue(household?.total_expense ?? 0, 'JPY')" :tone="-1" />
+          <Metric label="収支" :value="moneyValue(household?.net ?? 0, 'JPY')" :tone="household?.net ?? 0" />
+        </div>
+
+        <section class="rounded-md border border-border bg-panel">
+          <div class="flex flex-col gap-1 border-b border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <h2 class="text-sm font-semibold text-neutral-200">資産推移</h2>
+            <span class="text-xs text-neutral-500">{{ householdAssetPoints.length }}点</span>
+          </div>
+          <div class="p-4">
+            <div v-if="householdAssetChart.points.length >= 2" class="h-64 w-full">
+              <svg class="h-full w-full overflow-visible" viewBox="0 0 720 220" role="img">
+                <line x1="48" y1="14" x2="48" y2="184" stroke="#2a3036" />
+                <line x1="48" y1="184" x2="704" y2="184" stroke="#2a3036" />
+                <path :d="householdAssetChart.areaPath" fill="rgba(125, 211, 252, 0.10)" />
+                <path :d="householdAssetChart.linePath" fill="none" stroke="#7dd3fc" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+                <circle
+                  v-for="point in householdAssetChart.points"
+                  :key="point.date"
+                  :cx="point.x"
+                  :cy="point.y"
+                  r="3"
+                  fill="#101214"
+                  stroke="#7dd3fc"
+                  stroke-width="2"
+                >
+                  <title>{{ point.date }} {{ moneyValue(point.balance, 'JPY') }}</title>
+                </circle>
+                <text x="48" y="207" fill="#8b949e" font-size="12">{{ householdAssetChart.firstDate }}</text>
+                <text x="704" y="207" fill="#8b949e" font-size="12" text-anchor="end">{{ householdAssetChart.lastDate }}</text>
+                <text x="42" y="18" fill="#8b949e" font-size="12" text-anchor="end">{{ compact(householdAssetChart.maxBalance) }}</text>
+                <text x="42" y="188" fill="#8b949e" font-size="12" text-anchor="end">{{ compact(householdAssetChart.minBalance) }}</text>
+              </svg>
+            </div>
+            <div v-else class="flex h-40 items-center justify-center text-sm text-neutral-500">銀行明細の残高データが不足しています</div>
+          </div>
+        </section>
+
+        <div class="grid gap-5 xl:grid-cols-[minmax(320px,420px)_minmax(0,1fr)]">
+          <div class="grid gap-5">
+            <section class="rounded-md border border-border bg-panel">
+              <div class="border-b border-border px-4 py-3">
+                <h2 class="text-sm font-semibold text-neutral-200">支出カテゴリ</h2>
+              </div>
+              <div class="grid gap-3 p-4">
+                <div v-for="category in householdCategories" :key="category.category" class="grid gap-1">
+                  <div class="flex items-center justify-between gap-3 text-sm">
+                    <span class="truncate font-medium text-neutral-100">{{ category.category }}</span>
+                    <span class="shrink-0 text-neutral-300">{{ moneyValue(category.expense, 'JPY') }}</span>
+                  </div>
+                  <div class="h-2 overflow-hidden rounded bg-background">
+                    <div class="h-full bg-accent" :style="{ width: `${category.share_percent ?? 0}%` }"></div>
+                  </div>
+                  <div class="flex justify-between text-xs text-neutral-500">
+                    <span>{{ category.transaction_count }}件</span>
+                    <span>{{ percent(category.share_percent) }}</span>
+                  </div>
+                </div>
+                <p v-if="householdCategories.length === 0" class="py-6 text-center text-sm text-neutral-500">カテゴリ集計はありません</p>
+              </div>
+            </section>
+
+            <section class="rounded-md border border-border bg-panel">
+              <div class="border-b border-border px-4 py-3">
+                <h2 class="text-sm font-semibold text-neutral-200">月次推移</h2>
+              </div>
+              <div class="overflow-x-auto">
+                <table class="w-full min-w-[420px] text-left text-sm">
+                  <thead class="border-b border-border text-xs text-neutral-500">
+                    <tr>
+                      <th class="px-4 py-2 font-medium">月</th>
+                      <th class="px-4 py-2 text-right font-medium">収入</th>
+                      <th class="px-4 py-2 text-right font-medium">支出</th>
+                      <th class="px-4 py-2 text-right font-medium">収支</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="row in householdMonthlyDesc" :key="row.month" class="border-b border-border/70">
+                      <td class="px-4 py-2">
+                        <button class="font-medium text-accent hover:text-sky-200" type="button" @click="setHouseholdMonth(row.month)">{{ row.month }}</button>
+                      </td>
+                      <td class="px-4 py-2 text-right text-neutral-300">{{ moneyValue(row.income, 'JPY') }}</td>
+                      <td class="px-4 py-2 text-right text-neutral-300">{{ moneyValue(row.expense, 'JPY') }}</td>
+                      <td class="px-4 py-2 text-right" :class="row.net >= 0 ? 'text-gain' : 'text-loss'">{{ moneyValue(row.net, 'JPY') }}</td>
+                    </tr>
+                    <tr v-if="householdMonthlyDesc.length === 0">
+                      <td colspan="4" class="px-4 py-6 text-center text-sm text-neutral-500">月次データはありません</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+
+          <section class="min-w-0 rounded-md border border-border bg-panel">
+            <div class="flex flex-col gap-2 border-b border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 class="text-sm font-semibold text-neutral-200">明細</h2>
+                <p class="mt-1 text-xs text-neutral-500">最大支出: {{ household?.largest_expense ? `${household.largest_expense.transacted_at} ${household.largest_expense.merchant} ${moneyValue(household.largest_expense.amount, 'JPY')}` : 'N/A' }}</p>
+              </div>
+              <span class="text-xs text-neutral-500">{{ householdTransactions.length }}件</span>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="w-full min-w-[980px] table-fixed text-left text-sm">
+                <thead class="border-b border-border text-xs text-neutral-500">
+                  <tr>
+                    <th class="w-28 px-3 py-2 font-medium">日付</th>
+                    <th class="w-28 px-3 py-2 text-right font-medium">金額</th>
+                    <th class="w-40 px-3 py-2 font-medium">カテゴリ</th>
+                    <th class="w-[24%] px-3 py-2 font-medium">利用先</th>
+                    <th class="px-3 py-2 font-medium">内容</th>
+                    <th class="w-20 px-3 py-2 font-medium">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="transaction in householdTransactions" :key="transaction.id" class="border-b border-border/70 align-top hover:bg-background/70">
+                    <td class="px-3 py-3 text-neutral-300">{{ transaction.transacted_at }}</td>
+                    <td class="px-3 py-3 text-right font-semibold" :class="transaction.direction === 'income' ? 'text-gain' : 'text-neutral-100'">
+                      {{ transaction.direction === 'income' ? '+' : '-' }}{{ moneyValue(transaction.amount, 'JPY') }}
+                    </td>
+                    <td class="px-3 py-3">
+                      <select class="h-8 w-full rounded-md border border-border bg-panel px-2 text-xs outline-none focus:border-accent" :value="transaction.category" @change="changeHouseholdCategory(transaction, ($event.target as HTMLSelectElement).value)">
+                        <option v-for="category in householdCategoryOptions" :key="category" :value="category">{{ category }}</option>
+                      </select>
+                    </td>
+                    <td class="px-3 py-3">
+                      <p class="truncate font-medium text-neutral-100" :title="transaction.merchant">{{ transaction.merchant || '-' }}</p>
+                      <p class="mt-1 text-xs text-neutral-500">{{ transaction.source_type }}</p>
+                    </td>
+                    <td class="px-3 py-3">
+                      <p class="line-clamp-2 text-xs leading-5 text-neutral-400" :title="transaction.description">{{ transaction.description }}</p>
+                    </td>
+                    <td class="px-3 py-3">
+                      <button class="inline-flex h-8 items-center gap-1 rounded-md border border-border px-2 text-xs font-medium text-neutral-300 hover:border-accent hover:text-accent" type="button" @click="toggleHouseholdExcluded(transaction)">
+                        <X :size="13" />除外
+                      </button>
+                    </td>
+                  </tr>
+                  <tr v-if="householdTransactions.length === 0">
+                    <td colspan="6" class="px-4 py-10 text-center text-sm text-neutral-500">明細はありません</td>
                   </tr>
                 </tbody>
               </table>
@@ -830,6 +1184,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
+  CreditCard,
   EyeOff,
   GripVertical,
   Home,
@@ -839,6 +1194,7 @@ import {
   RefreshCw,
   Tag,
   Trash2,
+  Upload,
   X
 } from '@lucide/vue'
 import SparklineChart from './components/SparklineChart.vue'
@@ -852,8 +1208,11 @@ import {
   deletePurchase,
   deleteTask,
   deleteTaskTag,
+  getHouseholdAnalysis,
   getHistory,
   getInvestmentAnalysis,
+  importHouseholdCsv,
+  importHouseholdSamples,
   listRefreshJobs,
   listPurchases,
   listSymbols,
@@ -865,9 +1224,13 @@ import {
   refreshSymbol,
   updateTask,
   updateTaskTag,
+  updateHouseholdTransaction,
   updateSymbol,
+  type HouseholdAnalysis,
+  type HouseholdTransaction,
   type PricePoint,
   type Purchase,
+  type AnalysisCategory,
   type AnalysisRule,
   type AnalysisSignal,
   type InvestmentAnalysis,
@@ -905,6 +1268,7 @@ const Metric = defineComponent({
 const tabs = [
   { key: 'invest', label: '投資情報', icon: BriefcaseBusiness },
   { key: 'invest-support', label: '投資支援', icon: BarChart3 },
+  { key: 'household', label: '家計簿', icon: CreditCard },
   { key: 'tasks', label: 'タスク管理', icon: Layers },
   { key: 'home', label: 'スマートホーム', icon: Home }
 ]
@@ -922,7 +1286,9 @@ const chartModes = [
 const movingAverageOptions = [
   { period: 5, label: '5日移動平均線', shortLabel: '5日' },
   { period: 25, label: '25日移動平均線', shortLabel: '25日' },
-  { period: 75, label: '75日移動平均線', shortLabel: '75日' }
+  { period: 75, label: '75日移動平均線', shortLabel: '75日' },
+  { period: 100, label: '100日移動平均線', shortLabel: '100日' },
+  { period: 200, label: '200日移動平均線', shortLabel: '200日' }
 ]
 const chartDrawingModes = [
   { value: 'none' as const, label: '通常操作', shortLabel: '通常' },
@@ -945,11 +1311,44 @@ const taskTableColumns = [
   { value: 'tag' as const, label: 'タグ', class: 'w-[18%]' },
   { value: 'details' as const, label: '詳細', class: '' }
 ]
+const analysisCategoryColumns = [
+  { value: 'side' as const, label: '区分', class: 'w-16', align: 'left' },
+  { value: 'categoryA' as const, label: 'カテゴリA', class: 'w-44', align: 'left' },
+  { value: 'categoryB' as const, label: '同時カテゴリB', class: 'w-44', align: 'left' },
+  { value: 'relation' as const, label: '定義上の関係', class: '', align: 'left' },
+  { value: 'ruleCount' as const, label: 'ルール数', class: 'w-24 text-right', align: 'right' },
+  { value: 'current' as const, label: '現在', class: 'w-20 text-right', align: 'right' },
+  { value: 'strength' as const, label: '強さ', class: 'w-24 text-right', align: 'right' },
+  { value: 'signals' as const, label: '検証数', class: 'w-24 text-right', align: 'right' },
+  { value: 'accuracy' as const, label: '正答率', class: 'w-24 text-right', align: 'right' },
+  { value: 'expectedReturn' as const, label: '期待騰落率', class: 'w-28 text-right', align: 'right' },
+  { value: 'interactionEffect' as const, label: 'A単独平均との差', class: 'w-32 text-right', align: 'right' }
+]
+const analysisRuleColumns = [
+  { value: 'side' as const, label: '区分', class: 'w-16', align: 'left' },
+  { value: 'name' as const, label: 'ルール', class: 'w-56', align: 'left' },
+  { value: 'condition' as const, label: '条件', class: '', align: 'left' },
+  { value: 'current' as const, label: '現在', class: 'w-20 text-right', align: 'right' },
+  { value: 'strength' as const, label: '強さ', class: 'w-24 text-right', align: 'right' },
+  { value: 'signals' as const, label: '検証数', class: 'w-24 text-right', align: 'right' },
+  { value: 'accuracy' as const, label: '正答率', class: 'w-24 text-right', align: 'right' },
+  { value: 'expectedReturn' as const, label: '期待騰落率', class: 'w-28 text-right', align: 'right' },
+  { value: 'averageWidth' as const, label: '平均幅', class: 'w-28 text-right', align: 'right' }
+]
 
 type ChartDrawingMode = (typeof chartDrawingModes)[number]['value']
 type TaskSort = (typeof taskSortOptions)[number]['value']
 type SortDirection = 'asc' | 'desc'
 type AnalysisSideFilter = 'すべて' | '買い' | '売り'
+type AnalysisCategorySort = (typeof analysisCategoryColumns)[number]['value']
+type AnalysisRuleSort = (typeof analysisRuleColumns)[number]['value']
+type AnalysisCategoryCurrentSymbol = {
+  symbol_id: number
+  ticker: string
+  name: string
+  close: number
+  signal_count: number
+}
 type ChartGuideLine = {
   id: string
   type: 'support' | 'resistance'
@@ -987,12 +1386,28 @@ const draggingSymbolId = ref<number | null>(null)
 const tasks = ref<Task[]>([])
 const taskTags = ref<TaskTag[]>([])
 const taskError = ref('')
+const household = ref<HouseholdAnalysis | null>(null)
+const householdError = ref('')
+const householdMonth = ref('')
+const householdImporting = ref(false)
+const householdLoading = ref(false)
+const householdFileInput = ref<HTMLInputElement | null>(null)
 const analysis = ref<InvestmentAnalysis | null>(null)
 const analysisError = ref('')
 const analysisLoading = ref(false)
 const analysisSideFilter = ref<AnalysisSideFilter>('すべて')
 const analysisSignalFilter = ref('all')
 const expandedAnalysisRuleKeys = ref<string[]>([])
+const expandedAnalysisCategoryKeys = ref<string[]>([])
+const expandedAnalysisCategorySignalKey = ref<string | null>(null)
+const categoryBacktestOpen = ref(true)
+const ruleBacktestOpen = ref(true)
+const analysisCategorySort = ref<AnalysisCategorySort>('expectedReturn')
+const analysisCategorySortDirection = ref<SortDirection>('desc')
+const analysisRuleSort = ref<AnalysisRuleSort>('expectedReturn')
+const analysisRuleSortDirection = ref<SortDirection>('desc')
+const analysisLookbackYears = ref(5)
+const analysisHorizonDays = ref(20)
 const taskSort = ref<TaskSort>('due')
 const taskSortDirection = ref<SortDirection>('asc')
 const editingTaskId = ref<number | null>(null)
@@ -1012,6 +1427,8 @@ const selectedChartGuideLines = computed(() => (selectedId.value ? chartGuideLin
 const currentTab = computed(() => tabs.find((tab) => tab.key === activeTab.value))
 const editingTask = computed(() => tasks.value.find((task) => task.id === editingTaskId.value) ?? null)
 const taskSortMark = computed(() => (taskSortDirection.value === 'asc' ? '↑' : '↓'))
+const analysisCategorySortMark = computed(() => (analysisCategorySortDirection.value === 'asc' ? '↑' : '↓'))
+const analysisRuleSortMark = computed(() => (analysisRuleSortDirection.value === 'asc' ? '↑' : '↓'))
 const symbolTags = computed(() => {
   const tags = Array.from(new Set(symbols.value.map((symbol) => symbol.tag || 'ウォッチリスト'))).sort((a, b) =>
     a.localeCompare(b, 'ja')
@@ -1029,6 +1446,19 @@ const completedTasks = computed(() =>
     .filter((task) => task.status === 'done')
     .sort((a, b) => (b.completed_at ?? '').localeCompare(a.completed_at ?? '') || b.id - a.id)
 )
+const householdMonthOptions = computed(() => household.value?.monthly.map((row) => row.month) ?? [])
+const householdTransactions = computed(() => household.value?.transactions ?? [])
+const householdCategories = computed(() => household.value?.categories ?? [])
+const householdMonthlyDesc = computed(() => household.value?.monthly ?? [])
+const householdCategoryOptions = computed(() => {
+  const defaults = ['食費', '日用品', '娯楽', 'サブスク', '交通', '通信', '住居', '投資・貯蓄', '手数料', 'その他', '収入']
+  const fromData = householdTransactions.value.map((transaction) => transaction.category)
+  return Array.from(new Set([...defaults, ...fromData])).sort((a, b) => a.localeCompare(b, 'ja'))
+})
+const householdTopCategory = computed(() => householdCategories.value[0] ?? null)
+const householdSelectedMonthLabel = computed(() => householdMonth.value || '全期間')
+const householdAssetPoints = computed(() => household.value?.asset_points ?? [])
+const householdAssetChart = computed(() => buildHouseholdAssetChart())
 const analysisSideFilters: AnalysisSideFilter[] = ['すべて', '買い', '売り']
 const analysisSignalRuleOptions = computed(() =>
   Array.from(new Set((analysis.value?.signals ?? []).map((signal) => signal.rule_name))).sort((a, b) =>
@@ -1056,8 +1486,14 @@ const analysisSignals = computed<AnalysisSignal[]>(() =>
 )
 const filteredAnalysisRules = computed<AnalysisRule[]>(() => {
   const rules = analysis.value?.rules ?? []
-  if (analysisSideFilter.value === 'すべて') return rules
-  return rules.filter((rule) => rule.side === analysisSideFilter.value)
+  const filtered = analysisSideFilter.value === 'すべて' ? rules : rules.filter((rule) => rule.side === analysisSideFilter.value)
+  return [...filtered].sort(compareAnalysisRules)
+})
+const filteredAnalysisCategories = computed<AnalysisCategory[]>(() => {
+  const categories = analysis.value?.categories ?? []
+  const filtered =
+    analysisSideFilter.value === 'すべて' ? categories : categories.filter((category) => category.side === analysisSideFilter.value)
+  return [...filtered].sort(compareAnalysisCategories)
 })
 const standardizedRuleStrengthByName = computed(() => {
   const rules = analysis.value?.rules ?? []
@@ -1070,6 +1506,21 @@ const standardizedRuleStrengthByName = computed(() => {
     for (const rule of sideRules) {
       const raw = ruleRawSignalStrength(rule)
       result.set(rule.name, maxValue > minValue ? ((raw - minValue) / (maxValue - minValue)) * 100 : 50)
+    }
+  }
+  return result
+})
+const standardizedCategoryStrengthByKey = computed(() => {
+  const categories = analysis.value?.categories ?? []
+  const result = new Map<string, number>()
+  for (const side of ['買い', '売り']) {
+    const sideCategories = categories.filter((category) => category.side === side)
+    const rawValues = sideCategories.map((category) => categoryRawSignalStrength(category))
+    const minValue = Math.min(...rawValues)
+    const maxValue = Math.max(...rawValues)
+    for (const category of sideCategories) {
+      const raw = categoryRawSignalStrength(category)
+      result.set(analysisCategoryKey(category), maxValue > minValue ? ((raw - minValue) / (maxValue - minValue)) * 100 : 50)
     }
   }
   return result
@@ -1108,6 +1559,9 @@ watch(selectedSymbol, (symbol) => {
 watch(activeTab, (tab) => {
   if (tab === 'invest-support' && analysis.value === null && !analysisLoading.value) {
     void loadInvestmentAnalysis()
+  }
+  if (tab === 'household' && household.value === null && !householdLoading.value) {
+    void loadHousehold()
   }
 })
 
@@ -1172,10 +1626,131 @@ async function loadTaskData() {
   }
 }
 
+async function loadHousehold() {
+  householdLoading.value = true
+  try {
+    householdError.value = ''
+    household.value = await getHouseholdAnalysis(householdMonth.value || undefined)
+    if (!householdMonth.value && household.value.monthly[0]?.month) {
+      householdMonth.value = household.value.monthly[0].month
+      household.value = await getHouseholdAnalysis(householdMonth.value)
+    }
+  } catch (err) {
+    householdError.value = err instanceof Error ? err.message : '家計簿データの読み込みに失敗しました'
+  } finally {
+    householdLoading.value = false
+  }
+}
+
+async function importHouseholdSampleData() {
+  householdImporting.value = true
+  try {
+    householdError.value = ''
+    const result = await importHouseholdSamples()
+    await loadHousehold()
+    householdError.value = `${result.imported}件を取り込み、${result.skipped}件をスキップしました。${result.excluded}件を集計除外しました`
+  } catch (err) {
+    householdError.value = err instanceof Error ? err.message : 'サンプルCSVの取り込みに失敗しました'
+  } finally {
+    householdImporting.value = false
+  }
+}
+
+async function uploadHouseholdCsv(event: Event) {
+  const input = event.target as HTMLInputElement
+  const files = Array.from(input.files ?? [])
+  if (files.length === 0) return
+  householdImporting.value = true
+  try {
+    householdError.value = ''
+    const result = await importHouseholdCsv(files)
+    await loadHousehold()
+    householdError.value = `${result.imported}件を取り込み、${result.skipped}件をスキップしました。${result.excluded}件を集計除外しました`
+  } catch (err) {
+    householdError.value = err instanceof Error ? err.message : 'CSVの取り込みに失敗しました'
+  } finally {
+    input.value = ''
+    householdImporting.value = false
+  }
+}
+
+async function setHouseholdMonth(month: string) {
+  householdMonth.value = month
+  await loadHousehold()
+}
+
+function buildHouseholdAssetChart() {
+  const points = householdAssetPoints.value
+  const width = 720
+  const height = 220
+  const left = 48
+  const right = 16
+  const top = 14
+  const bottom = 36
+  const chartWidth = width - left - right
+  const chartHeight = height - top - bottom
+  if (points.length === 0) {
+    return {
+      points: [] as Array<{ date: string; balance: number; x: number; y: number }>,
+      linePath: '',
+      areaPath: '',
+      minBalance: 0,
+      maxBalance: 0,
+      firstDate: '',
+      lastDate: ''
+    }
+  }
+  const balances = points.map((point) => point.balance)
+  const minBalance = Math.min(...balances)
+  const maxBalance = Math.max(...balances)
+  const span = Math.max(1, maxBalance - minBalance)
+  const chartPoints = points.map((point, index) => {
+    const x = left + (points.length === 1 ? chartWidth : (index / (points.length - 1)) * chartWidth)
+    const y = top + ((maxBalance - point.balance) / span) * chartHeight
+    return { ...point, x, y }
+  })
+  const linePath = chartPoints.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(' ')
+  const areaPath =
+    chartPoints.length > 0
+      ? `${linePath} L ${chartPoints[chartPoints.length - 1].x.toFixed(2)} ${height - bottom} L ${left} ${height - bottom} Z`
+      : ''
+  return {
+    points: chartPoints,
+    linePath,
+    areaPath,
+    minBalance,
+    maxBalance,
+    firstDate: points[0]?.date ?? '',
+    lastDate: points[points.length - 1]?.date ?? ''
+  }
+}
+
+async function changeHouseholdCategory(transaction: HouseholdTransaction, category: string) {
+  try {
+    householdError.value = ''
+    await updateHouseholdTransaction(transaction.id, { category })
+    await loadHousehold()
+  } catch (err) {
+    householdError.value = err instanceof Error ? err.message : 'カテゴリ更新に失敗しました'
+  }
+}
+
+async function toggleHouseholdExcluded(transaction: HouseholdTransaction) {
+  try {
+    householdError.value = ''
+    await updateHouseholdTransaction(transaction.id, { excluded: !transaction.excluded })
+    await loadHousehold()
+  } catch (err) {
+    householdError.value = err instanceof Error ? err.message : '除外設定に失敗しました'
+  }
+}
+
 async function loadInvestmentAnalysis() {
   try {
     analysisError.value = ''
     analysis.value = await getInvestmentAnalysis()
+    analysisLookbackYears.value = analysis.value.lookback_years
+    analysisHorizonDays.value = analysis.value.horizon_days
     analysisLoading.value = analysis.value.status === 'running'
     updateAnalysisPolling()
   } catch (err) {
@@ -1187,7 +1762,10 @@ async function retryInvestmentBacktest() {
   try {
     analysisError.value = ''
     analysisLoading.value = true
-    analysis.value = await recalculateInvestmentAnalysis()
+    analysis.value = await recalculateInvestmentAnalysis({
+      horizonDays: analysisHorizonDays.value,
+      lookbackYears: analysisLookbackYears.value
+    })
     updateAnalysisPolling()
   } catch (err) {
     analysisLoading.value = false
@@ -1209,6 +1787,10 @@ function analysisRuleKey(rule: AnalysisRule) {
   return `${rule.side}:${rule.name}`
 }
 
+function analysisCategoryKey(category: AnalysisCategory) {
+  return `${category.side}:${category.name}`
+}
+
 function isAnalysisRuleExpanded(rule: AnalysisRule) {
   return expandedAnalysisRuleKeys.value.includes(analysisRuleKey(rule))
 }
@@ -1220,6 +1802,26 @@ function toggleAnalysisRuleDetail(rule: AnalysisRule) {
     : [...expandedAnalysisRuleKeys.value, key]
 }
 
+function isAnalysisCategoryExpanded(category: AnalysisCategory) {
+  return expandedAnalysisCategoryKeys.value.includes(analysisCategoryKey(category))
+}
+
+function toggleAnalysisCategoryDetail(category: AnalysisCategory) {
+  const key = analysisCategoryKey(category)
+  expandedAnalysisCategoryKeys.value = isAnalysisCategoryExpanded(category)
+    ? expandedAnalysisCategoryKeys.value.filter((value) => value !== key)
+    : [...expandedAnalysisCategoryKeys.value, key]
+}
+
+function isAnalysisCategorySignalsExpanded(category: AnalysisCategory) {
+  return expandedAnalysisCategorySignalKey.value === analysisCategoryKey(category)
+}
+
+function toggleAnalysisCategorySignals(category: AnalysisCategory) {
+  const key = analysisCategoryKey(category)
+  expandedAnalysisCategorySignalKey.value = expandedAnalysisCategorySignalKey.value === key ? null : key
+}
+
 function selectSignalRuleFilter(ruleName: string) {
   analysisSignalFilter.value = `rule:${ruleName}`
 }
@@ -1228,8 +1830,135 @@ function selectSignalSymbolFilter(symbolId: number) {
   analysisSignalFilter.value = `symbol:${symbolId}`
 }
 
+function setAnalysisCategorySort(sort: AnalysisCategorySort) {
+  if (analysisCategorySort.value === sort) {
+    analysisCategorySortDirection.value = analysisCategorySortDirection.value === 'asc' ? 'desc' : 'asc'
+    return
+  }
+  analysisCategorySort.value = sort
+  analysisCategorySortDirection.value = isAnalysisTextCategorySort(sort) ? 'asc' : 'desc'
+}
+
+function setAnalysisRuleSort(sort: AnalysisRuleSort) {
+  if (analysisRuleSort.value === sort) {
+    analysisRuleSortDirection.value = analysisRuleSortDirection.value === 'asc' ? 'desc' : 'asc'
+    return
+  }
+  analysisRuleSort.value = sort
+  analysisRuleSortDirection.value = isAnalysisTextRuleSort(sort) ? 'asc' : 'desc'
+}
+
+function isAnalysisTextCategorySort(sort: AnalysisCategorySort) {
+  return ['side', 'categoryA', 'categoryB', 'relation'].includes(sort)
+}
+
+function isAnalysisTextRuleSort(sort: AnalysisRuleSort) {
+  return ['side', 'name', 'condition'].includes(sort)
+}
+
+function compareAnalysisCategories(a: AnalysisCategory, b: AnalysisCategory) {
+  const sort = analysisCategorySort.value
+  const direction = analysisCategorySortDirection.value === 'asc' ? 1 : -1
+  const result =
+    isAnalysisTextCategorySort(sort)
+      ? compareText(analysisCategoryTextValue(a, sort), analysisCategoryTextValue(b, sort))
+      : compareNumber(analysisCategoryNumberValue(a, sort), analysisCategoryNumberValue(b, sort))
+  return result * direction || compareText(a.side, b.side) || compareText(a.name, b.name)
+}
+
+function compareAnalysisRules(a: AnalysisRule, b: AnalysisRule) {
+  const sort = analysisRuleSort.value
+  const direction = analysisRuleSortDirection.value === 'asc' ? 1 : -1
+  const result =
+    isAnalysisTextRuleSort(sort)
+      ? compareText(analysisRuleTextValue(a, sort), analysisRuleTextValue(b, sort))
+      : compareNumber(analysisRuleNumberValue(a, sort), analysisRuleNumberValue(b, sort))
+  return result * direction || compareText(a.side, b.side) || compareText(a.name, b.name)
+}
+
+function analysisCategoryTextValue(category: AnalysisCategory, sort: AnalysisCategorySort) {
+  if (sort === 'side') return category.side
+  if (sort === 'categoryA') return category.category_a ?? category.name
+  if (sort === 'categoryB') return category.category_b ?? ''
+  if (sort === 'relation') return category.relation ?? ''
+  return ''
+}
+
+function analysisCategoryNumberValue(category: AnalysisCategory, sort: AnalysisCategorySort) {
+  if (sort === 'ruleCount') return category.rule_count
+  if (sort === 'current') return category.current_signal_count
+  if (sort === 'strength') return categorySignalStrength(category)
+  if (sort === 'signals') return category.backtest.signals
+  if (sort === 'accuracy') return category.backtest.accuracy_percent
+  if (sort === 'expectedReturn') return category.backtest.average_return_percent
+  if (sort === 'interactionEffect') return category.interaction_effect_return_percent
+  return null
+}
+
+function analysisRuleTextValue(rule: AnalysisRule, sort: AnalysisRuleSort) {
+  if (sort === 'side') return rule.side
+  if (sort === 'name') return rule.name
+  if (sort === 'condition') return `${rule.condition} ${rule.description}`
+  return ''
+}
+
+function analysisRuleNumberValue(rule: AnalysisRule, sort: AnalysisRuleSort) {
+  if (sort === 'current') return rule.current_signal_count
+  if (sort === 'strength') return ruleSignalStrength(rule)
+  if (sort === 'signals') return rule.backtest.signals
+  if (sort === 'accuracy') return rule.backtest.accuracy_percent
+  if (sort === 'expectedReturn') return rule.backtest.average_return_percent
+  if (sort === 'averageWidth') return rule.backtest.average_abs_return_percent
+  return null
+}
+
+function compareText(a: string, b: string) {
+  return a.localeCompare(b, 'ja')
+}
+
+function compareNumber(a: number | null, b: number | null) {
+  const normalizedA = a ?? Number.NEGATIVE_INFINITY
+  const normalizedB = b ?? Number.NEGATIVE_INFINITY
+  return normalizedA - normalizedB
+}
+
+function analysisCategoryCurrentSymbols(category: AnalysisCategory): AnalysisCategoryCurrentSymbol[] {
+  const categoryA = category.category_a ?? category.name
+  const categoryB = category.category_b
+  const symbolsById = new Map<number, AnalysisCategoryCurrentSymbol>()
+  const signalsBySymbol = new Map<number, AnalysisSignal[]>()
+  for (const signal of analysis.value?.signals ?? []) {
+    const existing = signalsBySymbol.get(signal.symbol_id) ?? []
+    existing.push(signal)
+    signalsBySymbol.set(signal.symbol_id, existing)
+  }
+  for (const symbolSignals of signalsBySymbol.values()) {
+    const hasCategoryA = symbolSignals.some((signal) => signal.side === category.side && signal.primary_category === categoryA)
+    if (!hasCategoryA) continue
+    if (categoryB && !symbolSignals.some((signal) => signal.primary_category === categoryB)) continue
+    const first = symbolSignals[0]
+    symbolsById.set(first.symbol_id, {
+      symbol_id: first.symbol_id,
+      ticker: first.ticker,
+      name: first.name,
+      close: first.close,
+      signal_count: symbolSignals.length
+    })
+  }
+  return [...symbolsById.values()].sort((a, b) => a.ticker.localeCompare(b.ticker))
+}
+
+function openCategoryCurrentSymbol(symbolId: number) {
+  selectSignalSymbolFilter(symbolId)
+  document.getElementById('current-signals-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
 function ruleSignalStrength(rule: AnalysisRule) {
   return standardizedRuleStrengthByName.value.get(rule.name) ?? 0
+}
+
+function categorySignalStrength(category: AnalysisCategory) {
+  return standardizedCategoryStrengthByKey.value.get(analysisCategoryKey(category)) ?? 0
 }
 
 function ruleRawSignalStrength(rule: AnalysisRule) {
@@ -1237,6 +1966,17 @@ function ruleRawSignalStrength(rule: AnalysisRule) {
     return Math.max(0, rule.backtest.average_abs_return_percent ?? 0)
   }
   return Math.max(0, rule.backtest.average_return_percent ?? 0)
+}
+
+function categoryRawSignalStrength(category: AnalysisCategory) {
+  const categoryName = category.category_a ?? category.name
+  const relatedRules = (analysis.value?.rules ?? []).filter(
+    (rule) => rule.side === category.side && rule.primary_category === categoryName
+  )
+  if (relatedRules.some(isWidthExtractionRule)) {
+    return Math.max(0, category.backtest.average_abs_return_percent ?? 0)
+  }
+  return Math.max(0, category.backtest.average_return_percent ?? 0)
 }
 
 function isWidthExtractionRule(rule: AnalysisRule) {
@@ -1248,14 +1988,33 @@ function signalRuleStrength(signal: AnalysisSignal) {
   return standardizedRuleStrengthByName.value.get(signal.rule_name) ?? 0
 }
 
+function signalCategoryAdjustedStrength(signal: AnalysisSignal, symbolSignals: AnalysisSignal[]) {
+  const categoryName = signal.primary_category ?? '未分類'
+  const baseStrength = signalRuleStrength(signal)
+  const interactions = analysis.value?.category_interactions?.[categoryName] ?? {}
+  const sameSideCategories = new Set(
+    symbolSignals
+      .filter((other) => other !== signal && other.side === signal.side)
+      .map((other) => other.primary_category ?? '未分類')
+  )
+  const oppositeSideCategories = new Set(
+    symbolSignals
+      .filter((other) => other !== signal && other.side !== signal.side)
+      .map((other) => other.primary_category ?? '未分類')
+  )
+  const sameSideFactor = [...sameSideCategories].reduce((sum, category) => sum + (interactions[category] ?? 0), 0)
+  const oppositeSideFactor = [...oppositeSideCategories].reduce((sum, category) => sum - Math.abs(interactions[category] ?? 0), 0)
+  return Math.max(0, baseStrength * Math.max(0.2, 1 + sameSideFactor + oppositeSideFactor))
+}
+
 function symbolSignalStrength(symbolId: number) {
   const signals = (analysis.value?.signals ?? []).filter((signal) => signal.symbol_id === symbolId)
   const buyStrength = signals
     .filter((signal) => signal.side === '買い')
-    .reduce((sum, signal) => sum + signalRuleStrength(signal), 0)
+    .reduce((sum, signal) => sum + signalCategoryAdjustedStrength(signal, signals), 0)
   const sellStrength = signals
     .filter((signal) => signal.side === '売り')
-    .reduce((sum, signal) => sum + signalRuleStrength(signal), 0)
+    .reduce((sum, signal) => sum + signalCategoryAdjustedStrength(signal, signals), 0)
   const total = buyStrength + sellStrength
   return {
     buyStrength,

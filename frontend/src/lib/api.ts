@@ -68,9 +68,26 @@ export type AnalysisRule = {
   name: string
   condition: string
   description: string
+  primary_category: string | null
+  categories: string[]
   supported: boolean
   current_signal_count: number
   backtest: AnalysisBacktest
+  weekday_stats: AnalysisWeekdayStat[]
+}
+
+export type AnalysisCategory = {
+  side: string
+  name: string
+  category_a: string | null
+  category_b: string | null
+  relation: string | null
+  matrix_weight: number | null
+  rule_count: number
+  current_signal_count: number
+  backtest: AnalysisBacktest
+  baseline_backtest: AnalysisBacktest | null
+  interaction_effect_return_percent: number | null
   weekday_stats: AnalysisWeekdayStat[]
 }
 
@@ -80,6 +97,8 @@ export type AnalysisSignal = {
   name: string
   side: string
   rule_name: string
+  primary_category: string | null
+  categories: string[]
   date: string
   close: number
   reason: string
@@ -89,6 +108,8 @@ export type AnalysisSignal = {
 
 export type InvestmentAnalysis = {
   rules: AnalysisRule[]
+  categories: AnalysisCategory[]
+  category_interactions: Record<string, Record<string, number>>
   signals: AnalysisSignal[]
   generated_at: string | null
   horizon_days: number
@@ -151,11 +172,66 @@ export type Task = {
   updated_at: string
 }
 
+export type HouseholdTransaction = {
+  id: number
+  transacted_at: string
+  amount: number
+  direction: 'income' | 'expense'
+  category: string
+  merchant: string
+  description: string
+  source_type: string
+  balance_after: number | null
+  memo: string
+  excluded: boolean
+  created_at: string
+  updated_at: string
+}
+
+export type HouseholdMonthlySummary = {
+  month: string
+  income: number
+  expense: number
+  net: number
+  savings_rate_percent: number | null
+}
+
+export type HouseholdCategorySummary = {
+  category: string
+  expense: number
+  transaction_count: number
+  share_percent: number | null
+}
+
+export type HouseholdAssetPoint = {
+  date: string
+  balance: number
+}
+
+export type HouseholdAnalysis = {
+  transactions: HouseholdTransaction[]
+  monthly: HouseholdMonthlySummary[]
+  categories: HouseholdCategorySummary[]
+  asset_points: HouseholdAssetPoint[]
+  total_income: number
+  total_expense: number
+  net: number
+  average_monthly_expense: number
+  largest_expense: HouseholdTransaction | null
+}
+
+export type HouseholdImportResult = {
+  imported: number
+  skipped: number
+  excluded: number
+}
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? ''
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = init?.body instanceof FormData ? undefined : { 'Content-Type': 'application/json' }
   const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     ...init
   })
   if (!response.ok) {
@@ -187,8 +263,12 @@ export function getInvestmentAnalysis() {
   return request<InvestmentAnalysis>('/api/investment-support/analysis')
 }
 
-export function recalculateInvestmentAnalysis() {
-  return request<InvestmentAnalysis>('/api/investment-support/analysis/recalculate', { method: 'POST' })
+export function recalculateInvestmentAnalysis(params?: { horizonDays?: number; lookbackYears?: number }) {
+  const search = new URLSearchParams()
+  if (params?.horizonDays) search.set('horizon_days', String(params.horizonDays))
+  if (params?.lookbackYears) search.set('lookback_years', String(params.lookbackYears))
+  const query = search.toString()
+  return request<InvestmentAnalysis>(`/api/investment-support/analysis/recalculate${query ? `?${query}` : ''}`, { method: 'POST' })
 }
 
 export function createSymbol(ticker: string, name?: string, assetType = 'stock', tag?: string) {
@@ -306,4 +386,40 @@ export function updateTask(
 
 export function deleteTask(id: number) {
   return request<void>(`/api/tasks/${id}`, { method: 'DELETE' })
+}
+
+export function importHouseholdSamples() {
+  return request<HouseholdImportResult>('/api/household/import-samples', { method: 'POST' })
+}
+
+export function importHouseholdCsv(files: File[]) {
+  const formData = new FormData()
+  for (const file of files) {
+    formData.append('files', file)
+  }
+  return request<HouseholdImportResult>('/api/household/import-csv', {
+    method: 'POST',
+    body: formData
+  })
+}
+
+export function getHouseholdAnalysis(month?: string) {
+  const search = new URLSearchParams()
+  if (month) search.set('month', month)
+  const query = search.toString()
+  return request<HouseholdAnalysis>(`/api/household/analysis${query ? `?${query}` : ''}`)
+}
+
+export function updateHouseholdTransaction(
+  id: number,
+  payload: Partial<{
+    category: string
+    memo: string
+    excluded: boolean
+  }>
+) {
+  return request<HouseholdTransaction>(`/api/household/transactions/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload)
+  })
 }

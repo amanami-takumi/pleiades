@@ -123,6 +123,24 @@ def init_db() -> None:
               tag_id INTEGER NOT NULL REFERENCES task_tags(id) ON DELETE CASCADE,
               PRIMARY KEY (task_id, tag_id)
             );
+
+            CREATE TABLE IF NOT EXISTS household_transactions (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              transacted_at TEXT NOT NULL,
+              amount INTEGER NOT NULL,
+              direction TEXT NOT NULL,
+              category TEXT NOT NULL DEFAULT '未分類',
+              merchant TEXT NOT NULL DEFAULT '',
+              description TEXT NOT NULL DEFAULT '',
+              source_type TEXT NOT NULL,
+              source_key TEXT NOT NULL,
+              balance_after INTEGER,
+              memo TEXT NOT NULL DEFAULT '',
+              excluded INTEGER NOT NULL DEFAULT 0,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              UNIQUE(source_type, source_key)
+            );
             """
         )
         ensure_column(db, "symbols", "tag", "TEXT NOT NULL DEFAULT 'ウォッチリスト'")
@@ -132,6 +150,8 @@ def init_db() -> None:
         ensure_column(db, "refresh_jobs", "cancel_requested", "INTEGER NOT NULL DEFAULT 0")
         ensure_column(db, "tasks", "duration_days", "INTEGER")
         ensure_column(db, "tasks", "completed_at", "TEXT")
+        ensure_column(db, "household_transactions", "memo", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(db, "household_transactions", "excluded", "INTEGER NOT NULL DEFAULT 0")
         db.execute("UPDATE symbols SET display_order = id WHERE display_order = 0")
 
 

@@ -8,6 +8,10 @@ services:
       - ./backend:/usr/src/backend
       - ./data:/usr/src/data
       - ./売買ルール.csv:/usr/src/売買ルール.csv:ro
+      - ./quant_rules_categorized.csv:/usr/src/quant_rules_categorized.csv:ro
+      - ./category_interaction_matrix.csv:/usr/src/category_interaction_matrix.csv:ro
+      - ./銀行取引明細（サンプル）.csv:/usr/src/銀行取引明細（サンプル）.csv:ro
+      - ./デビットカード明細（サンプル）.csv:/usr/src/デビットカード明細（サンプル）.csv:ro
     ports:
       - "${BACKEND_PORT:-5050}:5050"
     environment:

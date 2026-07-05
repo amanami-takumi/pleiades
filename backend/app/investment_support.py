@@ -10,6 +10,7 @@ from statistics import mean, pstdev
 from .database import get_db
 from .models import (
     AnalysisBacktestOut,
+    AnalysisCategoryOut,
     AnalysisRuleOut,
     AnalysisSignalOut,
     AnalysisWeekdayStatOut,
@@ -19,6 +20,8 @@ from .models import (
 
 
 RULES_PATH = Path(__file__).resolve().parents[2] / "売買ルール.csv"
+CATEGORIZED_RULES_PATH = Path(__file__).resolve().parents[2] / "quant_rules_categorized.csv"
+CATEGORY_INTERACTION_PATH = Path(__file__).resolve().parents[2] / "category_interaction_matrix.csv"
 WEEKDAY_LABELS = ["月", "火", "水", "木", "金", "土", "日"]
 
 
@@ -39,6 +42,69 @@ class RuleDefinition:
     name: str
     condition: str
     description: str
+    primary_category: str | None = None
+    categories: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class CategoryInteractionDefinition:
+    label: str
+    weight: float
+
+
+@dataclass
+class BacktestAccumulator:
+    side: str
+    backtest_returns: list[float]
+    correct_count: int
+    current_signal_count: int
+    signal_day_returns_by_weekday: dict[int, list[float]]
+    signal_returns_by_weekday: dict[int, dict[int, list[float]]]
+    major_sq_week_signal_returns_by_weekday: dict[int, dict[int, list[float]]]
+
+    @classmethod
+    def create(cls, side: str) -> "BacktestAccumulator":
+        return cls(
+            side=side,
+            backtest_returns=[],
+            correct_count=0,
+            current_signal_count=0,
+            signal_day_returns_by_weekday=defaultdict(list),
+            signal_returns_by_weekday=defaultdict(lambda: defaultdict(list)),
+            major_sq_week_signal_returns_by_weekday=defaultdict(lambda: defaultdict(list)),
+        )
+
+    def add_backtest_signal(self, rows: list[PriceRow], index: int, horizon_days: int) -> None:
+        future_return = (rows[index + horizon_days].close - rows[index].close) / rows[index].close * 100
+        expected_return = future_return if self.side == "買い" else -future_return
+        self.backtest_returns.append(expected_return)
+        if expected_return > 0:
+            self.correct_count += 1
+        entry_weekday = weekday_for(rows[index].date)
+        if index > 0:
+            signal_day_return = (rows[index].close - rows[index - 1].close) / rows[index - 1].close * 100
+            self.signal_day_returns_by_weekday[entry_weekday].append(signal_day_return)
+        for forward_days in (1, 3, 5):
+            if index + forward_days < len(rows):
+                forward_return = (rows[index + forward_days].close - rows[index].close) / rows[index].close * 100
+                expected_forward_return = forward_return if self.side == "買い" else -forward_return
+                self.signal_returns_by_weekday[entry_weekday][forward_days].append(expected_forward_return)
+                if is_major_sq_week(rows[index].date):
+                    self.major_sq_week_signal_returns_by_weekday[entry_weekday][forward_days].append(
+                        expected_forward_return
+                    )
+
+    def to_backtest(self) -> AnalysisBacktestOut:
+        signals = len(self.backtest_returns)
+        return AnalysisBacktestOut(
+            signals=signals,
+            correct=self.correct_count,
+            accuracy_percent=(self.correct_count / signals * 100) if signals else None,
+            average_return_percent=mean(self.backtest_returns) if self.backtest_returns else None,
+            average_abs_return_percent=mean(abs(value) for value in self.backtest_returns)
+            if self.backtest_returns
+            else None,
+        )
 
 
 @dataclass(frozen=True)
@@ -63,9 +129,10 @@ class IndicatorSeries:
 
 
 def load_rule_definitions() -> list[RuleDefinition]:
-    if not RULES_PATH.exists():
+    path = CATEGORIZED_RULES_PATH if CATEGORIZED_RULES_PATH.exists() else RULES_PATH
+    if not path.exists():
         return []
-    with RULES_PATH.open(newline="", encoding="utf-8-sig") as file:
+    with path.open(newline="", encoding="utf-8-sig") as file:
         rows = list(csv.DictReader(file))
     return [
         RuleDefinition(
@@ -74,10 +141,63 @@ def load_rule_definitions() -> list[RuleDefinition]:
             name=row.get("ルール名", ""),
             condition=row.get("売買条件例", ""),
             description=row.get("狙い・特徴", ""),
+            primary_category=(row.get("主カテゴリ") or None),
+            categories=tuple(split_categories(row.get("カテゴリタグ", ""))),
         )
         for row in rows
         if row.get("区分") and row.get("ルール名")
     ]
+
+
+def split_categories(value: str) -> list[str]:
+    return [item.strip() for item in value.split(";") if item.strip()]
+
+
+def load_category_interaction_matrix() -> dict[str, dict[str, CategoryInteractionDefinition]]:
+    if not CATEGORY_INTERACTION_PATH.exists():
+        return {}
+    with CATEGORY_INTERACTION_PATH.open(newline="", encoding="utf-8-sig") as file:
+        rows = list(csv.DictReader(file))
+    interactions: dict[str, dict[str, CategoryInteractionDefinition]] = {}
+    for row in rows:
+        category = row.get("カテゴリA", "")
+        if not category:
+            continue
+        interactions[category] = {
+            other: CategoryInteractionDefinition(label=text, weight=category_interaction_weight(text))
+            for other, text in row.items()
+            if other and other != "カテゴリA" and text
+        }
+    return interactions
+
+
+def category_interaction_weights(
+    matrix: dict[str, dict[str, CategoryInteractionDefinition]],
+) -> dict[str, dict[str, float]]:
+    return {
+        category: {other: definition.weight for other, definition in others.items()}
+        for category, others in matrix.items()
+    }
+
+
+def category_interaction_weight(text: str) -> float:
+    if "強い衝突" in text or "方向衝突" in text:
+        return -0.5
+    if "衝突注意" in text:
+        return -0.25
+    if "弱い衝突" in text:
+        return -0.15
+    if "同系統" in text:
+        return -0.1
+    if "近接" in text:
+        return -0.05
+    if "補完" in text:
+        return 0.25
+    if "条件付き" in text:
+        return 0.05
+    if "弱い関連" in text:
+        return 0.03
+    return 0.0
 
 
 def build_investment_analysis(
@@ -89,24 +209,44 @@ def build_investment_analysis(
     histories = load_price_histories(backtest_days + horizon_days + 260)
     rule_definitions = load_rule_definitions()
     if not rule_definitions:
-        return InvestmentAnalysisOut(rules=[], signals=[], generated_at=None, horizon_days=horizon_days)
+        return InvestmentAnalysisOut(
+            rules=[],
+            categories=[],
+            signals=[],
+            generated_at=None,
+            horizon_days=horizon_days,
+            lookback_years=lookback_years,
+        )
 
     symbol_by_id = {symbol.id: symbol for symbol in symbols}
     momentum_scores = build_momentum_scores(histories)
     market_returns_by_weekday = build_market_returns_by_weekday(histories)
     major_sq_week_market_returns_by_weekday = build_market_returns_by_weekday(histories, major_sq_week_only=True)
+    category_interaction_matrix = load_category_interaction_matrix()
+    category_interactions = category_interaction_weights(category_interaction_matrix)
+    matrix_categories = list(category_interaction_matrix.keys())
     rules: list[AnalysisRuleOut] = []
     current_signals: list[AnalysisSignalOut] = []
+    category_accumulators: dict[tuple[str, str], BacktestAccumulator] = {}
+    category_rule_names: dict[tuple[str, str], set[str]] = defaultdict(set)
+    category_backtest_seen: set[tuple[str, str, int, str]] = set()
+    category_current_seen: set[tuple[str, str, int]] = set()
+    category_events_by_symbol_date: dict[
+        tuple[int, str], dict[tuple[str, str], tuple[list[PriceRow], int]]
+    ] = defaultdict(dict)
+    current_categories_by_symbol: dict[int, set[tuple[str, str]]] = defaultdict(set)
 
     for definition in rule_definitions:
-        backtest_returns: list[float] = []
-        correct_count = 0
+        rule_accumulator = BacktestAccumulator.create(definition.side)
         current_count = 0
-        signal_day_returns_by_weekday: dict[int, list[float]] = defaultdict(list)
-        signal_returns_by_weekday: dict[int, dict[int, list[float]]] = defaultdict(lambda: defaultdict(list))
-        major_sq_week_signal_returns_by_weekday: dict[int, dict[int, list[float]]] = defaultdict(
-            lambda: defaultdict(list)
+        primary_category = definition.primary_category or "未分類"
+        category_key = (definition.side, primary_category)
+        category_rule_names[category_key].add(definition.name)
+        category_accumulator = category_accumulators.setdefault(
+            category_key,
+            BacktestAccumulator.create(definition.side),
         )
+        categories = tuple(dict.fromkeys((primary_category, *definition.categories)))
 
         for symbol_id, rows in histories.items():
             symbol = symbol_by_id.get(symbol_id)
@@ -118,29 +258,24 @@ def build_investment_analysis(
                 result = evaluate_rule(definition.name, symbol_id, rows, index, momentum_scores, indicators)
                 if result is None:
                     continue
-                future_return = (rows[index + horizon_days].close - rows[index].close) / rows[index].close * 100
-                expected_return = future_return if definition.side == "買い" else -future_return
-                backtest_returns.append(expected_return)
-                if expected_return > 0:
-                    correct_count += 1
-                entry_weekday = weekday_for(rows[index].date)
-                if index > 0:
-                    signal_day_return = (rows[index].close - rows[index - 1].close) / rows[index - 1].close * 100
-                    signal_day_returns_by_weekday[entry_weekday].append(signal_day_return)
-                for forward_days in (1, 3, 5):
-                    if index + forward_days < len(rows):
-                        forward_return = (rows[index + forward_days].close - rows[index].close) / rows[index].close * 100
-                        expected_forward_return = forward_return if definition.side == "買い" else -forward_return
-                        signal_returns_by_weekday[entry_weekday][forward_days].append(expected_forward_return)
-                        if is_major_sq_week(rows[index].date):
-                            major_sq_week_signal_returns_by_weekday[entry_weekday][forward_days].append(
-                                expected_forward_return
-                            )
+                rule_accumulator.add_backtest_signal(rows, index, horizon_days)
+                category_seen_key = (definition.side, primary_category, symbol_id, rows[index].date)
+                if category_seen_key not in category_backtest_seen:
+                    category_backtest_seen.add(category_seen_key)
+                    category_accumulator.add_backtest_signal(rows, index, horizon_days)
+                    category_events_by_symbol_date[(symbol_id, rows[index].date)][
+                        (definition.side, primary_category)
+                    ] = (rows, index)
 
             latest_index = len(rows) - 1
             result = evaluate_rule(definition.name, symbol_id, rows, latest_index, momentum_scores, indicators)
             if result is not None:
                 current_count += 1
+                category_current_key = (definition.side, primary_category, symbol.id)
+                if category_current_key not in category_current_seen:
+                    category_current_seen.add(category_current_key)
+                    category_accumulator.current_signal_count += 1
+                    current_categories_by_symbol[symbol.id].add((definition.side, primary_category))
                 current_signals.append(
                     AnalysisSignalOut(
                         symbol_id=symbol.id,
@@ -148,6 +283,8 @@ def build_investment_analysis(
                         name=symbol.name,
                         side=definition.side,
                         rule_name=definition.name,
+                        primary_category=primary_category,
+                        categories=list(categories),
                         date=rows[latest_index].date,
                         close=rows[latest_index].close,
                         reason=result,
@@ -156,45 +293,139 @@ def build_investment_analysis(
                     )
                 )
 
-        signals = len(backtest_returns)
         rules.append(
             AnalysisRuleOut(
                 side=definition.side,
                 name=definition.name,
                 condition=definition.condition,
                 description=definition.description,
+                primary_category=primary_category,
+                categories=list(categories),
                 supported=is_supported_rule(definition.name),
                 current_signal_count=current_count,
-                backtest=AnalysisBacktestOut(
-                    signals=signals,
-                    correct=correct_count,
-                    accuracy_percent=(correct_count / signals * 100) if signals else None,
-                    average_return_percent=mean(backtest_returns) if backtest_returns else None,
-                    average_abs_return_percent=mean(abs(value) for value in backtest_returns)
-                    if backtest_returns
-                    else None,
-                ),
+                backtest=rule_accumulator.to_backtest(),
                 weekday_stats=build_weekday_stats(
                     definition.side,
                     market_returns_by_weekday,
                     major_sq_week_market_returns_by_weekday,
-                    signal_day_returns_by_weekday,
-                    signal_returns_by_weekday,
-                    major_sq_week_signal_returns_by_weekday,
+                    rule_accumulator.signal_day_returns_by_weekday,
+                    rule_accumulator.signal_returns_by_weekday,
+                    rule_accumulator.major_sq_week_signal_returns_by_weekday,
                 ),
             )
         )
 
+    categories = build_category_interaction_backtests(
+        matrix_categories,
+        category_interaction_matrix,
+        category_accumulators,
+        category_rule_names,
+        category_events_by_symbol_date,
+        current_categories_by_symbol,
+        market_returns_by_weekday,
+        major_sq_week_market_returns_by_weekday,
+        horizon_days,
+    )
+    categories.sort(key=lambda category: (category.side != "買い", category.name))
     current_signals.sort(key=lambda signal: (signal.side != "買い", signal.rule_name, signal.ticker))
     generated_at = max((rows[-1].date for rows in histories.values() if rows), default=None)
     return InvestmentAnalysisOut(
         rules=rules,
+        categories=categories,
+        category_interactions=category_interactions,
         signals=current_signals,
         generated_at=generated_at,
         horizon_days=horizon_days,
         lookback_years=lookback_years,
         status="succeeded",
     )
+
+
+def build_category_interaction_backtests(
+    matrix_categories: list[str],
+    category_interaction_matrix: dict[str, dict[str, CategoryInteractionDefinition]],
+    category_accumulators: dict[tuple[str, str], BacktestAccumulator],
+    category_rule_names: dict[tuple[str, str], set[str]],
+    category_events_by_symbol_date: dict[tuple[int, str], dict[tuple[str, str], tuple[list[PriceRow], int]]],
+    current_categories_by_symbol: dict[int, set[tuple[str, str]]],
+    market_returns_by_weekday: dict[int, list[float]],
+    major_sq_week_market_returns_by_weekday: dict[int, list[float]],
+    horizon_days: int,
+) -> list[AnalysisCategoryOut]:
+    if not matrix_categories:
+        return [
+            AnalysisCategoryOut(
+                side=side,
+                name=category,
+                category_a=category,
+                rule_count=len(category_rule_names[(side, category)]),
+                current_signal_count=accumulator.current_signal_count,
+                backtest=accumulator.to_backtest(),
+                weekday_stats=build_weekday_stats(
+                    side,
+                    market_returns_by_weekday,
+                    major_sq_week_market_returns_by_weekday,
+                    accumulator.signal_day_returns_by_weekday,
+                    accumulator.signal_returns_by_weekday,
+                    accumulator.major_sq_week_signal_returns_by_weekday,
+                ),
+            )
+            for (side, category), accumulator in category_accumulators.items()
+        ]
+
+    categories: list[AnalysisCategoryOut] = []
+    for side in ("買い", "売り"):
+        for category_a in matrix_categories:
+            baseline_accumulator = category_accumulators.get((side, category_a), BacktestAccumulator.create(side))
+            baseline_backtest = baseline_accumulator.to_backtest()
+            for category_b in matrix_categories:
+                interaction_definition = category_interaction_matrix.get(category_a, {}).get(category_b)
+                accumulator = BacktestAccumulator.create(side)
+                current_signal_count = 0
+                for categories_for_symbol in current_categories_by_symbol.values():
+                    if (side, category_a) not in categories_for_symbol:
+                        continue
+                    if any(category == category_b for _, category in categories_for_symbol):
+                        current_signal_count += 1
+                for event_categories in category_events_by_symbol_date.values():
+                    event = event_categories.get((side, category_a))
+                    if event is None:
+                        continue
+                    if not any(category == category_b for _, category in event_categories):
+                        continue
+                    rows, index = event
+                    accumulator.add_backtest_signal(rows, index, horizon_days)
+                backtest = accumulator.to_backtest()
+                baseline_average = baseline_backtest.average_return_percent
+                interaction_average = backtest.average_return_percent
+                categories.append(
+                    AnalysisCategoryOut(
+                        side=side,
+                        name=f"{category_a} × {category_b}",
+                        category_a=category_a,
+                        category_b=category_b,
+                        relation=interaction_definition.label if interaction_definition else None,
+                        matrix_weight=interaction_definition.weight if interaction_definition else None,
+                        rule_count=len(category_rule_names[(side, category_a)]),
+                        current_signal_count=current_signal_count,
+                        backtest=backtest,
+                        baseline_backtest=baseline_backtest,
+                        interaction_effect_return_percent=(
+                            interaction_average - baseline_average
+                            if interaction_average is not None and baseline_average is not None
+                            else None
+                        ),
+                        weekday_stats=build_weekday_stats(
+                            side,
+                            market_returns_by_weekday,
+                            major_sq_week_market_returns_by_weekday,
+                            accumulator.signal_day_returns_by_weekday,
+                            accumulator.signal_returns_by_weekday,
+                            accumulator.major_sq_week_signal_returns_by_weekday,
+                        ),
+                    )
+                )
+    return categories
 
 
 def build_market_returns_by_weekday(

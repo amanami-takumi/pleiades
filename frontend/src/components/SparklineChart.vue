@@ -33,6 +33,32 @@
       </text>
     </g>
 
+    <g v-if="selectedReturnRange">
+      <rect
+        :x="selectedReturnRange.x"
+        :y="plot.top"
+        :width="selectedReturnRange.width"
+        :height="plotHeight"
+        fill="#7dd3fc"
+        opacity="0.08"
+      />
+      <line :x1="selectedReturnRange.startX" :y1="plot.top" :x2="selectedReturnRange.startX" :y2="plot.bottom" stroke="#7dd3fc" stroke-width="1.5" />
+      <line :x1="selectedReturnRange.endX" :y1="plot.top" :x2="selectedReturnRange.endX" :y2="plot.bottom" stroke="#7dd3fc" stroke-width="1.5" />
+      <g :transform="`translate(${selectedReturnRange.labelX}, ${selectedReturnRange.labelY})`">
+        <rect width="150" height="48" rx="4" fill="#171a1d" stroke="#7dd3fc" opacity="0.96" />
+        <text x="10" y="19" :fill="selectedReturnRange.returnPercent >= 0 ? '#48c78e' : '#ff6b6b'" font-size="13" font-weight="700">
+          騰落率 {{ formatPercent(selectedReturnRange.returnPercent) }}
+        </text>
+        <text x="10" y="37" fill="#8e99a3" font-size="11">
+          {{ selectedReturnRange.startDate }} - {{ selectedReturnRange.endDate }}
+        </text>
+      </g>
+    </g>
+    <g v-else-if="selectedReturnStart">
+      <line :x1="selectedReturnStart.x" :y1="plot.top" :x2="selectedReturnStart.x" :y2="plot.bottom" stroke="#7dd3fc" stroke-width="1.5" />
+      <circle :cx="selectedReturnStart.x" :cy="selectedReturnStart.y" r="4" fill="#7dd3fc" stroke="#101214" stroke-width="2" />
+    </g>
+
     <g v-if="mode === 'candlestick'">
       <g v-for="candle in candles" :key="candle.point.date">
         <line
@@ -125,11 +151,12 @@
       :width="plotWidth"
       :height="plotHeight"
       fill="transparent"
-      :style="{ cursor: drawingMode === 'none' ? 'default' : 'crosshair' }"
+      :style="{ cursor: drawingMode === 'none' ? 'pointer' : 'crosshair' }"
       @pointerdown="handlePointerDown"
       @pointermove="handlePointerMove"
       @pointerup="handlePointerUp"
       @pointercancel="cancelGuideLineDraft"
+      @click="handleRangeClick"
     />
     <text v-if="!hasVisibleData" x="390" y="144" text-anchor="middle" fill="#8e99a3" font-size="14">データ未取得</text>
   </svg>
@@ -163,7 +190,9 @@ const emit = defineEmits<{
 const MOVING_AVERAGE_CONFIG = [
   { period: 5, label: '5日線', color: '#facc15' },
   { period: 25, label: '25日線', color: '#38bdf8' },
-  { period: 75, label: '75日線', color: '#c084fc' }
+  { period: 75, label: '75日線', color: '#c084fc' },
+  { period: 100, label: '100日線', color: '#fb923c' },
+  { period: 200, label: '200日線', color: '#2dd4bf' }
 ]
 
 const plot = {
@@ -176,6 +205,8 @@ const plotWidth = plot.right - plot.left
 const plotHeight = plot.bottom - plot.top
 const svgRef = ref<SVGSVGElement | null>(null)
 const hoverIndex = ref<number | null>(null)
+const selectedReturnStartIndex = ref<number | null>(null)
+const selectedReturnEndIndex = ref<number | null>(null)
 const mode = computed(() => props.mode ?? 'line')
 const drawingMode = computed(() => props.drawingMode ?? 'none')
 const activeMovingAverages = computed(() => new Set(props.movingAverages ?? []))
@@ -264,6 +295,35 @@ const entries = computed(() =>
 )
 const hoverEntry = computed(() => (hoverIndex.value === null ? null : entries.value[hoverIndex.value] ?? null))
 const hasVisibleData = computed(() => (mode.value === 'candlestick' ? candles.value.length > 0 : Boolean(path.value)))
+const selectedReturnStart = computed(() =>
+  selectedReturnStartIndex.value === null ? null : entries.value[selectedReturnStartIndex.value] ?? null
+)
+const selectedReturnRange = computed(() => {
+  if (selectedReturnStartIndex.value === null || selectedReturnEndIndex.value === null) return null
+  const startIndex = Math.min(selectedReturnStartIndex.value, selectedReturnEndIndex.value)
+  const endIndex = Math.max(selectedReturnStartIndex.value, selectedReturnEndIndex.value)
+  const start = entries.value[startIndex]
+  const end = entries.value[endIndex]
+  if (!start || !end) return null
+  const startClose = start.point.close
+  const endClose = end.point.close
+  if (startClose === null || endClose === null || startClose === 0) return null
+  const returnPercent = ((endClose - startClose) / startClose) * 100
+  const x = Math.min(start.x, end.x)
+  const width = Math.max(2, Math.abs(end.x - start.x))
+  const labelX = clamp(x + width / 2 - 75, plot.left, plot.right - 150)
+  return {
+    x,
+    width,
+    startX: start.x,
+    endX: end.x,
+    labelX,
+    labelY: plot.top + 8,
+    startDate: formatDate(start.point.date),
+    endDate: formatDate(end.point.date),
+    returnPercent
+  }
+})
 const hoverMovingAverages = computed(() => {
   if (hoverIndex.value === null) return []
   return movingAverageLines.value.flatMap((average) => {
@@ -330,6 +390,13 @@ function formatAxisNumber(value: number) {
   }).format(value)
 }
 
+function formatPercent(value: number) {
+  return `${value >= 0 ? '+' : ''}${new Intl.NumberFormat('ja-JP', {
+    maximumFractionDigits: 2,
+    minimumFractionDigits: 2
+  }).format(value)}%`
+}
+
 function formatNullableAxisNumber(value: number | null) {
   return value === null ? 'N/A' : formatAxisNumber(value)
 }
@@ -355,7 +422,7 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max)
 }
 
-function pointerToPlotPoint(event: PointerEvent) {
+function pointerToPlotPoint(event: PointerEvent | MouseEvent) {
   if (!svgRef.value) return null
   const point = svgRef.value.createSVGPoint()
   point.x = event.clientX
@@ -371,6 +438,22 @@ function pointerToPlotPoint(event: PointerEvent) {
     ratio: (x - plot.left) / plotWidth,
     value: yToValue(y)
   }
+}
+
+function nearestEntryIndex(event: PointerEvent | MouseEvent) {
+  if (!svgRef.value || entries.value.length === 0) return null
+  const cursor = pointerToPlotPoint(event)
+  if (!cursor) return null
+  let nearestIndex = 0
+  let nearestDistance = Number.POSITIVE_INFINITY
+  entries.value.forEach((entry, index) => {
+    const distance = Math.abs(entry.x - cursor.x)
+    if (distance < nearestDistance) {
+      nearestDistance = distance
+      nearestIndex = index
+    }
+  })
+  return nearestIndex
 }
 
 function mapGuideLine(line: ChartGuideLine) {
@@ -440,19 +523,7 @@ function handlePointerMove(event: PointerEvent) {
     }
     return
   }
-  if (!svgRef.value || entries.value.length === 0) return
-  const cursor = pointerToPlotPoint(event)
-  if (!cursor) return
-  let nearestIndex = 0
-  let nearestDistance = Number.POSITIVE_INFINITY
-  entries.value.forEach((entry, index) => {
-    const distance = Math.abs(entry.x - cursor.x)
-    if (distance < nearestDistance) {
-      nearestDistance = distance
-      nearestIndex = index
-    }
-  })
-  hoverIndex.value = nearestIndex
+  hoverIndex.value = nearestEntryIndex(event)
 }
 
 function handlePointerUp(event: PointerEvent) {
@@ -471,5 +542,18 @@ function handlePointerUp(event: PointerEvent) {
 
 function cancelGuideLineDraft() {
   guideLineDraft.value = null
+}
+
+function handleRangeClick(event: MouseEvent) {
+  if (drawingMode.value !== 'none') return
+  const index = nearestEntryIndex(event)
+  if (index === null) return
+  if (selectedReturnStartIndex.value === null || selectedReturnEndIndex.value !== null) {
+    selectedReturnStartIndex.value = index
+    selectedReturnEndIndex.value = null
+    return
+  }
+  if (selectedReturnStartIndex.value === index) return
+  selectedReturnEndIndex.value = index
 }
 </script>

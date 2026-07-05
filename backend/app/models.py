@@ -88,9 +88,26 @@ class AnalysisRuleOut(BaseModel):
     name: str
     condition: str
     description: str
+    primary_category: str | None = None
+    categories: list[str] = Field(default_factory=list)
     supported: bool
     current_signal_count: int
     backtest: AnalysisBacktestOut
+    weekday_stats: list[AnalysisWeekdayStatOut] = Field(default_factory=list)
+
+
+class AnalysisCategoryOut(BaseModel):
+    side: str
+    name: str
+    category_a: str | None = None
+    category_b: str | None = None
+    relation: str | None = None
+    matrix_weight: float | None = None
+    rule_count: int
+    current_signal_count: int
+    backtest: AnalysisBacktestOut
+    baseline_backtest: AnalysisBacktestOut | None = None
+    interaction_effect_return_percent: float | None = None
     weekday_stats: list[AnalysisWeekdayStatOut] = Field(default_factory=list)
 
 
@@ -100,6 +117,8 @@ class AnalysisSignalOut(BaseModel):
     name: str
     side: str
     rule_name: str
+    primary_category: str | None = None
+    categories: list[str] = Field(default_factory=list)
     date: str
     close: float
     reason: str
@@ -109,6 +128,8 @@ class AnalysisSignalOut(BaseModel):
 
 class InvestmentAnalysisOut(BaseModel):
     rules: list[AnalysisRuleOut]
+    categories: list[AnalysisCategoryOut] = Field(default_factory=list)
+    category_interactions: dict[str, dict[str, float]] = Field(default_factory=dict)
     signals: list[AnalysisSignalOut]
     generated_at: str | None = None
     horizon_days: int
@@ -208,3 +229,63 @@ class TaskOut(BaseModel):
     completed_at: str | None = None
     created_at: str
     updated_at: str
+
+
+class HouseholdTransactionUpdate(BaseModel):
+    category: str | None = Field(default=None, min_length=1, max_length=80)
+    memo: str | None = Field(default=None, max_length=500)
+    excluded: bool | None = None
+
+
+class HouseholdTransactionOut(BaseModel):
+    id: int
+    transacted_at: str
+    amount: int
+    direction: str
+    category: str
+    merchant: str
+    description: str
+    source_type: str
+    balance_after: int | None = None
+    memo: str
+    excluded: bool
+    created_at: str
+    updated_at: str
+
+
+class HouseholdMonthlySummaryOut(BaseModel):
+    month: str
+    income: int
+    expense: int
+    net: int
+    savings_rate_percent: float | None = None
+
+
+class HouseholdCategorySummaryOut(BaseModel):
+    category: str
+    expense: int
+    transaction_count: int
+    share_percent: float | None = None
+
+
+class HouseholdAssetPointOut(BaseModel):
+    date: str
+    balance: int
+
+
+class HouseholdImportOut(BaseModel):
+    imported: int
+    skipped: int
+    excluded: int = 0
+
+
+class HouseholdAnalysisOut(BaseModel):
+    transactions: list[HouseholdTransactionOut]
+    monthly: list[HouseholdMonthlySummaryOut]
+    categories: list[HouseholdCategorySummaryOut]
+    asset_points: list[HouseholdAssetPointOut] = Field(default_factory=list)
+    total_income: int
+    total_expense: int
+    net: int
+    average_monthly_expense: float
+    largest_expense: HouseholdTransactionOut | None = None

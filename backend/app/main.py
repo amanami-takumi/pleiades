@@ -7,13 +7,21 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from .database import get_db, init_db, seed_defaults
+from .household import exclude_matching_bank_debit_withdrawals, insert_import_rows, parse_sample_files, parse_uploaded_csv_files
 from .investment_support import build_investment_analysis
 from .market import RANGE_TO_DAYS, normalize_ticker, refresh_symbols
 from .models import (
+    HouseholdAnalysisOut,
+    HouseholdAssetPointOut,
+    HouseholdCategorySummaryOut,
+    HouseholdImportOut,
+    HouseholdMonthlySummaryOut,
+    HouseholdTransactionOut,
+    HouseholdTransactionUpdate,
     HistoryOut,
     InvestmentAnalysisOut,
     PricePoint,
@@ -101,7 +109,10 @@ async def _start_investment_analysis_if_stale() -> None:
             """,
             (analysis_date,),
         )
-    await start_investment_analysis_recalculation()
+    await start_investment_analysis_recalculation(
+        horizon_days=INVESTMENT_ANALYSIS_HORIZON_DAYS,
+        lookback_years=INVESTMENT_ANALYSIS_LOOKBACK_YEARS,
+    )
 
 
 @asynccontextmanager
@@ -239,8 +250,12 @@ def get_cached_investment_analysis() -> InvestmentAnalysisOut:
             "investment_analysis_error",
             "investment_analysis_last_started_at",
             "investment_analysis_last_finished_at",
+            "investment_analysis_horizon_days",
+            "investment_analysis_lookback_years",
         ]
     )
+    horizon_days = int(values.get("investment_analysis_horizon_days", INVESTMENT_ANALYSIS_HORIZON_DAYS))
+    lookback_years = int(values.get("investment_analysis_lookback_years", INVESTMENT_ANALYSIS_LOOKBACK_YEARS))
     payload = values.get("investment_analysis_payload")
     if payload:
         try:
@@ -250,16 +265,16 @@ def get_cached_investment_analysis() -> InvestmentAnalysisOut:
                 rules=[],
                 signals=[],
                 generated_at=None,
-                horizon_days=INVESTMENT_ANALYSIS_HORIZON_DAYS,
-                lookback_years=INVESTMENT_ANALYSIS_LOOKBACK_YEARS,
+                horizon_days=horizon_days,
+                lookback_years=lookback_years,
             )
     else:
         analysis = InvestmentAnalysisOut(
             rules=[],
             signals=[],
             generated_at=None,
-            horizon_days=INVESTMENT_ANALYSIS_HORIZON_DAYS,
-            lookback_years=INVESTMENT_ANALYSIS_LOOKBACK_YEARS,
+            horizon_days=horizon_days,
+            lookback_years=lookback_years,
         )
     analysis.status = values.get("investment_analysis_status", analysis.status)
     analysis.error = values.get("investment_analysis_error")
@@ -268,7 +283,7 @@ def get_cached_investment_analysis() -> InvestmentAnalysisOut:
     return analysis
 
 
-async def start_investment_analysis_recalculation() -> InvestmentAnalysisOut:
+async def start_investment_analysis_recalculation(horizon_days: int, lookback_years: int) -> InvestmentAnalysisOut:
     global investment_analysis_task
     if investment_analysis_task and not investment_analysis_task.done():
         return get_cached_investment_analysis()
@@ -278,27 +293,31 @@ async def start_investment_analysis_recalculation() -> InvestmentAnalysisOut:
             "investment_analysis_status": "running",
             "investment_analysis_error": "",
             "investment_analysis_last_started_at": started_at,
+            "investment_analysis_horizon_days": str(horizon_days),
+            "investment_analysis_lookback_years": str(lookback_years),
         }
     )
-    investment_analysis_task = asyncio.create_task(run_investment_analysis_recalculation())
+    investment_analysis_task = asyncio.create_task(run_investment_analysis_recalculation(horizon_days, lookback_years))
     return get_cached_investment_analysis()
 
 
-async def run_investment_analysis_recalculation() -> None:
+async def run_investment_analysis_recalculation(horizon_days: int, lookback_years: int) -> None:
     started_at = datetime.now(UTC).isoformat()
     set_app_state(
         {
             "investment_analysis_status": "running",
             "investment_analysis_error": "",
             "investment_analysis_last_started_at": started_at,
+            "investment_analysis_horizon_days": str(horizon_days),
+            "investment_analysis_lookback_years": str(lookback_years),
         }
     )
     try:
         analysis = await asyncio.to_thread(
             lambda: build_investment_analysis(
                 load_all_symbols(),
-                INVESTMENT_ANALYSIS_HORIZON_DAYS,
-                INVESTMENT_ANALYSIS_LOOKBACK_YEARS,
+                horizon_days,
+                lookback_years,
             )
         )
         finished_at = datetime.now(UTC).isoformat()
@@ -330,8 +349,11 @@ def investment_support_analysis() -> InvestmentAnalysisOut:
 
 
 @app.post("/api/investment-support/analysis/recalculate", response_model=InvestmentAnalysisOut)
-async def recalculate_investment_support_analysis() -> InvestmentAnalysisOut:
-    return await start_investment_analysis_recalculation()
+async def recalculate_investment_support_analysis(
+    horizon_days: int = Query(default=INVESTMENT_ANALYSIS_HORIZON_DAYS, ge=1, le=260),
+    lookback_years: int = Query(default=INVESTMENT_ANALYSIS_LOOKBACK_YEARS, ge=1, le=20),
+) -> InvestmentAnalysisOut:
+    return await start_investment_analysis_recalculation(horizon_days=horizon_days, lookback_years=lookback_years)
 
 
 @app.post("/api/symbols", response_model=SymbolOut)
@@ -479,6 +501,24 @@ def task_from_row(row, tags: list[TaskTagOut]) -> TaskOut:
     )
 
 
+def household_transaction_from_row(row) -> HouseholdTransactionOut:
+    return HouseholdTransactionOut(
+        id=row["id"],
+        transacted_at=row["transacted_at"],
+        amount=row["amount"],
+        direction=row["direction"],
+        category=row["category"],
+        merchant=row["merchant"],
+        description=row["description"],
+        source_type=row["source_type"],
+        balance_after=row["balance_after"],
+        memo=row["memo"],
+        excluded=bool(row["excluded"]),
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
 def fetch_task_tags(db, task_ids: list[int]) -> dict[int, list[TaskTagOut]]:
     if not task_ids:
         return {}
@@ -608,6 +648,200 @@ def delete_task_tag(tag_id: int) -> dict[str, str]:
         if result.rowcount == 0:
             raise HTTPException(status_code=404, detail="Task tag not found")
     return {"status": "deleted"}
+
+
+@app.post("/api/household/import-samples", response_model=HouseholdImportOut)
+def import_household_samples() -> HouseholdImportOut:
+    try:
+        rows = parse_sample_files()
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"CSV import failed: {exc}") from exc
+    with get_db() as db:
+        result = insert_import_rows(db, rows)
+        result["excluded"] = exclude_matching_bank_debit_withdrawals(db, rows)
+    return HouseholdImportOut(**result)
+
+
+@app.post("/api/household/import-csv", response_model=HouseholdImportOut)
+async def import_household_csv(files: list[UploadFile] = File(...)) -> HouseholdImportOut:
+    if not files:
+        raise HTTPException(status_code=422, detail="CSV file is required")
+    try:
+        contents = [await file.read() for file in files]
+        rows = parse_uploaded_csv_files(contents)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"CSV import failed: {exc}") from exc
+    with get_db() as db:
+        result = insert_import_rows(db, rows)
+        result["excluded"] = exclude_matching_bank_debit_withdrawals(db, rows)
+    return HouseholdImportOut(**result)
+
+
+@app.get("/api/household/analysis", response_model=HouseholdAnalysisOut)
+def household_analysis(month: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$|^$")) -> HouseholdAnalysisOut:
+    filters = ["excluded = 0"]
+    values: list[object] = []
+    if month:
+        filters.append("substr(transacted_at, 1, 7) = ?")
+        values.append(month)
+    where_clause = "WHERE " + " AND ".join(filters)
+    with get_db() as db:
+        transaction_rows = db.execute(
+            f"""
+            SELECT id, transacted_at, amount, direction, category, merchant, description,
+                   source_type, balance_after, memo, excluded, created_at, updated_at
+            FROM household_transactions
+            {where_clause}
+            ORDER BY transacted_at DESC, id DESC
+            LIMIT 500
+            """,
+            values,
+        ).fetchall()
+        monthly_rows = db.execute(
+            """
+            SELECT
+              substr(transacted_at, 1, 7) AS month,
+              SUM(CASE WHEN direction = 'income' THEN amount ELSE 0 END) AS income,
+              SUM(CASE WHEN direction = 'expense' THEN amount ELSE 0 END) AS expense
+            FROM household_transactions
+            WHERE excluded = 0
+            GROUP BY substr(transacted_at, 1, 7)
+            ORDER BY month DESC
+            """
+        ).fetchall()
+        category_rows = db.execute(
+            f"""
+            SELECT category, SUM(amount) AS expense, COUNT(*) AS transaction_count
+            FROM household_transactions
+            {where_clause} AND direction = 'expense'
+            GROUP BY category
+            ORDER BY expense DESC, category
+            """,
+            values,
+        ).fetchall()
+        total_row = db.execute(
+            f"""
+            SELECT
+              SUM(CASE WHEN direction = 'income' THEN amount ELSE 0 END) AS income,
+              SUM(CASE WHEN direction = 'expense' THEN amount ELSE 0 END) AS expense
+            FROM household_transactions
+            {where_clause}
+            """,
+            values,
+        ).fetchone()
+        largest_row = db.execute(
+            f"""
+            SELECT id, transacted_at, amount, direction, category, merchant, description,
+                   source_type, balance_after, memo, excluded, created_at, updated_at
+            FROM household_transactions
+            {where_clause} AND direction = 'expense'
+            ORDER BY amount DESC, transacted_at DESC
+            LIMIT 1
+            """,
+            values,
+        ).fetchone()
+        asset_rows = db.execute(
+            """
+            SELECT transacted_at AS date, balance_after AS balance
+            FROM (
+              SELECT
+                transacted_at,
+                balance_after,
+                ROW_NUMBER() OVER (PARTITION BY transacted_at ORDER BY id DESC) AS rn
+              FROM household_transactions
+              WHERE source_type = 'bank' AND balance_after IS NOT NULL
+            )
+            WHERE rn = 1
+            ORDER BY date
+            """
+        ).fetchall()
+
+    transactions = [household_transaction_from_row(row) for row in transaction_rows]
+    monthly = []
+    for row in monthly_rows:
+        income = row["income"] or 0
+        expense = row["expense"] or 0
+        monthly.append(
+            HouseholdMonthlySummaryOut(
+                month=row["month"],
+                income=income,
+                expense=expense,
+                net=income - expense,
+                savings_rate_percent=((income - expense) / income * 100) if income else None,
+            )
+        )
+    total_income = total_row["income"] or 0
+    total_expense = total_row["expense"] or 0
+    categories = [
+        HouseholdCategorySummaryOut(
+            category=row["category"],
+            expense=row["expense"] or 0,
+            transaction_count=row["transaction_count"],
+            share_percent=((row["expense"] or 0) / total_expense * 100) if total_expense else None,
+        )
+        for row in category_rows
+    ]
+    monthly_expenses = [row.expense for row in monthly if row.expense > 0]
+    return HouseholdAnalysisOut(
+        transactions=transactions,
+        monthly=monthly,
+        categories=categories,
+        asset_points=[HouseholdAssetPointOut(date=row["date"], balance=row["balance"]) for row in asset_rows],
+        total_income=total_income,
+        total_expense=total_expense,
+        net=total_income - total_expense,
+        average_monthly_expense=sum(monthly_expenses) / len(monthly_expenses) if monthly_expenses else 0,
+        largest_expense=household_transaction_from_row(largest_row) if largest_row else None,
+    )
+
+
+@app.patch("/api/household/transactions/{transaction_id}", response_model=HouseholdTransactionOut)
+def update_household_transaction(transaction_id: int, payload: HouseholdTransactionUpdate) -> HouseholdTransactionOut:
+    fields = payload.model_fields_set
+    if not fields:
+        with get_db() as db:
+            row = db.execute(
+                """
+                SELECT id, transacted_at, amount, direction, category, merchant, description,
+                       source_type, balance_after, memo, excluded, created_at, updated_at
+                FROM household_transactions
+                WHERE id = ?
+                """,
+                (transaction_id,),
+            ).fetchone()
+            if row is None:
+                raise HTTPException(status_code=404, detail="Household transaction not found")
+            return household_transaction_from_row(row)
+    updates = []
+    values: list[object] = []
+    if "category" in fields:
+        category = (payload.category or "").strip()
+        if not category:
+            raise HTTPException(status_code=422, detail="Category is required")
+        updates.append("category = ?")
+        values.append(category)
+    if "memo" in fields:
+        updates.append("memo = ?")
+        values.append(payload.memo or "")
+    if "excluded" in fields:
+        updates.append("excluded = ?")
+        values.append(1 if payload.excluded else 0)
+    updates.append("updated_at = CURRENT_TIMESTAMP")
+    values.append(transaction_id)
+    with get_db() as db:
+        result = db.execute(f"UPDATE household_transactions SET {', '.join(updates)} WHERE id = ?", values)
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Household transaction not found")
+        row = db.execute(
+            """
+            SELECT id, transacted_at, amount, direction, category, merchant, description,
+                   source_type, balance_after, memo, excluded, created_at, updated_at
+            FROM household_transactions
+            WHERE id = ?
+            """,
+            (transaction_id,),
+        ).fetchone()
+    return household_transaction_from_row(row)
 
 
 @app.get("/api/tasks", response_model=list[TaskOut])
