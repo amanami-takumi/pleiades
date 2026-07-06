@@ -25,6 +25,19 @@ MARKET_RETRY_COUNT=2
 MARKET_RATE_LIMIT_BACKOFF_SECONDS=60
 ```
 
+## 家庭内サービス向け市場データAPI
+
+別サービスから保存済みの投資情報を読み取り専用で取得できます。`EXTERNAL_API_KEY` を設定した場合は、リクエストヘッダー `X-Pleiades-Api-Key` に同じ値を指定してください。未設定の場合は家庭内LAN/VPN内利用を前提に認証なしで応答します。
+
+```bash
+curl http://localhost:5050/api/external/market/symbols
+curl "http://localhost:5050/api/external/market/daily-prices/7203.T?from=2026-01-01&to=2026-06-30"
+curl -H "X-Pleiades-Api-Key: your-key" http://localhost:5050/api/external/market/symbols
+```
+
+- `GET /api/external/market/symbols`: 登録銘柄、最新終値、主要指標の一覧
+- `GET /api/external/market/daily-prices/{ticker}`: 指定ティッカーの日足 OHLCV と初日基準の騰落率
+
 ## 実装済み
 
 - 左側の縦タブとスマホ右下メニュー

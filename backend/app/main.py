@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import FastAPI, File, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from .database import get_db, init_db, seed_defaults
@@ -22,6 +22,8 @@ from .models import (
     HouseholdMonthlySummaryOut,
     HouseholdTransactionOut,
     HouseholdTransactionUpdate,
+    ExternalDailyPricesOut,
+    ExternalMarketSnapshotOut,
     HistoryOut,
     InvestmentAnalysisOut,
     PricePoint,
@@ -49,6 +51,7 @@ AUTO_REFRESH_HOUR_JST = int(os.getenv("AUTO_REFRESH_HOUR_JST", "23"))
 INVESTMENT_ANALYSIS_HOUR_JST = int(os.getenv("INVESTMENT_ANALYSIS_HOUR_JST", "1"))
 INVESTMENT_ANALYSIS_HORIZON_DAYS = int(os.getenv("INVESTMENT_ANALYSIS_HORIZON_DAYS", "20"))
 INVESTMENT_ANALYSIS_LOOKBACK_YEARS = int(os.getenv("INVESTMENT_ANALYSIS_LOOKBACK_YEARS", "5"))
+EXTERNAL_API_KEY = os.getenv("EXTERNAL_API_KEY", "")
 investment_analysis_task: asyncio.Task | None = None
 
 
@@ -214,6 +217,64 @@ def list_symbols() -> list[SymbolOut]:
     return [symbol_from_row(row) for row in rows]
 
 
+@app.get("/api/external/market/symbols", response_model=ExternalMarketSnapshotOut)
+def external_market_symbols(
+    x_pleiades_api_key: str | None = Header(default=None),
+) -> ExternalMarketSnapshotOut:
+    require_external_api_key(x_pleiades_api_key)
+    return ExternalMarketSnapshotOut(
+        symbols=load_all_symbols(),
+        generated_at=datetime.now(UTC).isoformat(),
+    )
+
+
+@app.get("/api/external/market/daily-prices/{ticker}", response_model=ExternalDailyPricesOut)
+def external_daily_prices(
+    ticker: str,
+    from_date: str | None = Query(default=None, alias="from", pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    to_date: str | None = Query(default=None, alias="to", pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    x_pleiades_api_key: str | None = Header(default=None),
+) -> ExternalDailyPricesOut:
+    require_external_api_key(x_pleiades_api_key)
+    if from_date and to_date and from_date > to_date:
+        raise HTTPException(status_code=422, detail="from must be earlier than or equal to to")
+
+    normalized_ticker = normalize_ticker(ticker)
+    price_filters = ["symbol_id = ?"]
+    price_params: list[object] = []
+
+    with get_db() as db:
+        symbol_row = db.execute(f"{symbol_query()} WHERE s.ticker = ?", (normalized_ticker,)).fetchone()
+        if symbol_row is None:
+            raise HTTPException(status_code=404, detail="Symbol not found")
+
+        price_params.append(symbol_row["id"])
+        if from_date:
+            price_filters.append("date >= ?")
+            price_params.append(from_date)
+        if to_date:
+            price_filters.append("date <= ?")
+            price_params.append(to_date)
+
+        rows = db.execute(
+            f"""
+            SELECT date, open, high, low, close, adj_close, volume
+            FROM prices
+            WHERE {' AND '.join(price_filters)}
+            ORDER BY date
+            """,
+            price_params,
+        ).fetchall()
+
+    return ExternalDailyPricesOut(
+        symbol=symbol_from_row(symbol_row),
+        points=price_points_from_rows(rows),
+        generated_at=datetime.now(UTC).isoformat(),
+        from_date=from_date,
+        to_date=to_date,
+    )
+
+
 def load_all_symbols() -> list[SymbolOut]:
     with get_db() as db:
         rows = db.execute(f"{symbol_query()} ORDER BY s.display_order, s.id").fetchall()
@@ -240,6 +301,30 @@ def set_app_state(values: dict[str, str]) -> None:
                 """,
                 (key, value),
             )
+
+
+def require_external_api_key(x_pleiades_api_key: str | None) -> None:
+    if EXTERNAL_API_KEY and x_pleiades_api_key != EXTERNAL_API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid external API key")
+
+
+def price_points_from_rows(rows) -> list[PricePoint]:
+    first_close = next((row["close"] for row in rows if row["close"]), None)
+    return [
+        PricePoint(
+            date=row["date"],
+            open=row["open"],
+            high=row["high"],
+            low=row["low"],
+            close=row["close"],
+            adj_close=row["adj_close"],
+            volume=row["volume"],
+            return_percent=((row["close"] - first_close) / first_close * 100)
+            if row["close"] is not None and first_close
+            else None,
+        )
+        for row in rows
+    ]
 
 
 def get_cached_investment_analysis() -> InvestmentAnalysisOut:
@@ -1040,20 +1125,4 @@ def history(symbol_id: int, range: str = Query(default="1y", pattern="^(1w|1m|3m
             (symbol_id, since),
         ).fetchall()
 
-    first_close = next((row["close"] for row in rows if row["close"]), None)
-    points = [
-        PricePoint(
-            date=row["date"],
-            open=row["open"],
-            high=row["high"],
-            low=row["low"],
-            close=row["close"],
-            adj_close=row["adj_close"],
-            volume=row["volume"],
-            return_percent=((row["close"] - first_close) / first_close * 100)
-            if row["close"] is not None and first_close
-            else None,
-        )
-        for row in rows
-    ]
-    return HistoryOut(symbol=symbol_from_row(symbol_row), points=points)
+    return HistoryOut(symbol=symbol_from_row(symbol_row), points=price_points_from_rows(rows))

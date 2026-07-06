@@ -21,6 +21,7 @@ services:
       - MARKET_SYMBOL_INTERVAL_SECONDS=${MARKET_SYMBOL_INTERVAL_SECONDS:-5}
       - MARKET_RETRY_COUNT=${MARKET_RETRY_COUNT:-2}
       - MARKET_RATE_LIMIT_BACKOFF_SECONDS=${MARKET_RATE_LIMIT_BACKOFF_SECONDS:-60}
+      - EXTERNAL_API_KEY=${EXTERNAL_API_KEY:-}
     command: sh -c "pip install -r requirements.txt && uvicorn app.main:app --host 0.0.0.0 --port 5050 --reload"
     restart: unless-stopped
 

@@ -55,6 +55,19 @@ class HistoryOut(BaseModel):
     points: list[PricePoint]
 
 
+class ExternalDailyPricesOut(BaseModel):
+    symbol: SymbolOut
+    points: list[PricePoint]
+    generated_at: str
+    from_date: str | None = None
+    to_date: str | None = None
+
+
+class ExternalMarketSnapshotOut(BaseModel):
+    symbols: list[SymbolOut]
+    generated_at: str
+
+
 class AnalysisBacktestOut(BaseModel):
     signals: int
     correct: int
