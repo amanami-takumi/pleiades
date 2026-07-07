@@ -36,7 +36,7 @@ curl -H "X-Pleiades-Api-Key: your-key" http://localhost:5050/api/external/market
 ```
 
 - `GET /api/external/market/symbols`: 登録銘柄、最新終値、主要指標の一覧
-- `GET /api/external/market/daily-prices/{ticker}`: 指定ティッカーの日足 OHLCV と初日基準の騰落率
+- `GET /api/external/market/daily-prices/{ticker}`: 指定ティッカーの日足 OHLCV、初日基準の騰落率、MA20/MA60/MA200、MACDヒストグラム、BB上下限2σ、RSI14
 
 ## 実装済み
 

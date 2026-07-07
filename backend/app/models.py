@@ -50,6 +50,16 @@ class PricePoint(BaseModel):
     return_percent: float | None = None
 
 
+class ExternalDailyPricePoint(PricePoint):
+    ma20: float | None = None
+    ma60: float | None = None
+    ma200: float | None = None
+    macd_histogram: float | None = None
+    bb_upper_2sigma: float | None = None
+    bb_lower_2sigma: float | None = None
+    rsi_14: float | None = None
+
+
 class HistoryOut(BaseModel):
     symbol: SymbolOut
     points: list[PricePoint]
@@ -57,7 +67,7 @@ class HistoryOut(BaseModel):
 
 class ExternalDailyPricesOut(BaseModel):
     symbol: SymbolOut
-    points: list[PricePoint]
+    points: list[ExternalDailyPricePoint]
     generated_at: str
     from_date: str | None = None
     to_date: str | None = None

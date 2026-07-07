@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .database import get_db, init_db, seed_defaults
 from .household import exclude_matching_bank_debit_withdrawals, insert_import_rows, parse_sample_files, parse_uploaded_csv_files
-from .investment_support import build_investment_analysis
+from .investment_support import PriceRow, build_indicators, build_investment_analysis, rsi
 from .market import RANGE_TO_DAYS, normalize_ticker, refresh_symbols
 from .models import (
     HouseholdAnalysisOut,
@@ -23,6 +23,7 @@ from .models import (
     HouseholdTransactionOut,
     HouseholdTransactionUpdate,
     ExternalDailyPricesOut,
+    ExternalDailyPricePoint,
     ExternalMarketSnapshotOut,
     HistoryOut,
     InvestmentAnalysisOut,
@@ -265,10 +266,19 @@ def external_daily_prices(
             """,
             price_params,
         ).fetchall()
+        indicator_rows = db.execute(
+            """
+            SELECT date, open, high, low, close, adj_close, volume
+            FROM prices
+            WHERE symbol_id = ?
+            ORDER BY date
+            """,
+            (symbol_row["id"],),
+        ).fetchall()
 
     return ExternalDailyPricesOut(
         symbol=symbol_from_row(symbol_row),
-        points=price_points_from_rows(rows),
+        points=external_price_points_from_rows(rows, indicator_rows),
         generated_at=datetime.now(UTC).isoformat(),
         from_date=from_date,
         to_date=to_date,
@@ -325,6 +335,57 @@ def price_points_from_rows(rows) -> list[PricePoint]:
         )
         for row in rows
     ]
+
+
+def external_price_points_from_rows(rows, indicator_rows) -> list[ExternalDailyPricePoint]:
+    first_close = next((row["close"] for row in rows if row["close"]), None)
+    indicators_by_date = technical_indicators_by_date(indicator_rows)
+    return [
+        ExternalDailyPricePoint(
+            date=row["date"],
+            open=row["open"],
+            high=row["high"],
+            low=row["low"],
+            close=row["close"],
+            adj_close=row["adj_close"],
+            volume=row["volume"],
+            return_percent=((row["close"] - first_close) / first_close * 100)
+            if row["close"] is not None and first_close
+            else None,
+            **indicators_by_date.get(row["date"], {}),
+        )
+        for row in rows
+    ]
+
+
+def technical_indicators_by_date(rows) -> dict[str, dict[str, float | None]]:
+    price_rows = [
+        PriceRow(
+            date=row["date"],
+            open=row["open"],
+            close=row["close"],
+            high=row["high"],
+            low=row["low"],
+            volume=row["volume"],
+        )
+        for row in rows
+        if row["close"] is not None and row["close"] > 0
+    ]
+    if not price_rows:
+        return {}
+    indicators = build_indicators(price_rows)
+    return {
+        row.date: {
+            "ma20": indicators.ma20[index],
+            "ma60": indicators.ma60[index],
+            "ma200": indicators.ma200[index],
+            "macd_histogram": indicators.macd_hist[index],
+            "bb_upper_2sigma": indicators.bb_upper_2[index],
+            "bb_lower_2sigma": indicators.bb_lower_2[index],
+            "rsi_14": rsi(price_rows, index, 14),
+        }
+        for index, row in enumerate(price_rows)
+    }
 
 
 def get_cached_investment_analysis() -> InvestmentAnalysisOut:

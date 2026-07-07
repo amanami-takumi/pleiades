@@ -81,7 +81,7 @@ curl -H "X-Pleiades-Api-Key: your-key" http://localhost:5050/api/external/market
 
 ## 日足データを取得する
 
-指定したティッカーの日足 OHLCV を取得します。
+指定したティッカーの日足 OHLCV とテクニカル指標を取得します。
 
 ```bash
 curl "http://localhost:5050/api/external/market/daily-prices/7203.T"
@@ -111,6 +111,13 @@ curl -H "X-Pleiades-Api-Key: your-key" "http://localhost:5050/api/external/marke
 - `points[].adj_close`: 調整後終値
 - `points[].volume`: 出来高
 - `points[].return_percent`: 取得範囲の初回終値を基準にした騰落率
+- `points[].ma20`: 20日移動平均
+- `points[].ma60`: 60日移動平均
+- `points[].ma200`: 200日移動平均
+- `points[].macd_histogram`: MACDヒストグラム
+- `points[].bb_upper_2sigma`: ボリンジャーバンド上限2σ
+- `points[].bb_lower_2sigma`: ボリンジャーバンド下限2σ
+- `points[].rsi_14`: RSI(14)
 - `from_date`: 指定した開始日
 - `to_date`: 指定した終了日
 - `generated_at`: API応答生成日時
